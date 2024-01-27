@@ -784,21 +784,15 @@ pub(crate) struct RouterState {
     pub service: Arc<GatewayService>,
     pub sender: Sender<BoxedTask>,
     pub running_builds: Arc<Mutex<TtlCache<Uuid, ()>>>,
-    pub posthog_client: async_posthog::Client,
+    pub posthog_client: Arc<async_posthog::Client>,
 }
 
 pub struct ApiBuilder {
     router: Router<RouterState>,
     service: Option<Arc<GatewayService>>,
     sender: Option<Sender<BoxedTask>>,
-    posthog_client: Option<async_posthog::Client>,
+    posthog_client: Option<Arc<async_posthog::Client>>,
     bind: Option<SocketAddr>,
-}
-
-impl Default for ApiBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl ApiBuilder {
@@ -855,7 +849,7 @@ impl ApiBuilder {
         self
     }
 
-    pub fn with_posthog_client(mut self, posthog_client: async_posthog::Client) -> Self {
+    pub fn with_posthog_client(mut self, posthog_client: Arc<async_posthog::Client>) -> Self {
         self.posthog_client = Some(posthog_client);
         self
     }

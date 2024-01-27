@@ -143,7 +143,7 @@ async fn start(
     let mut api_builder = ApiBuilder::new()
         .with_service(Arc::clone(&gateway))
         .with_sender(sender.clone())
-        .with_posthog_client(posthog_client)
+        .with_posthog_client(Arc::new(posthog_client))
         .binding_to(args.control);
 
     let mut user_builder = UserServiceBuilder::new()
