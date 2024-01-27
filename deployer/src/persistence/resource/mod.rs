@@ -1,6 +1,9 @@
 pub mod database;
 
-use shuttle_common::{claims::Claim, resource::Type as CommonResourceType};
+use shuttle_common::{
+    claims::Claim,
+    resource::{ResourceInfo, ResourceType},
+};
 use shuttle_proto::resource_recorder::{
     record_request, ResourceResponse, ResourcesResponse, ResultResponse,
 };
@@ -31,14 +34,14 @@ pub trait ResourceManager: Clone + Send + Sync + 'static {
     async fn get_resource(
         &mut self,
         service_id: &ulid::Ulid,
-        r#type: CommonResourceType,
+        r#type: ResourceType,
         claim: Claim,
     ) -> Result<ResourceResponse, Self::Err>;
     async fn delete_resource(
         &mut self,
         project_name: String,
         service_id: &ulid::Ulid,
-        r#type: CommonResourceType,
+        r#type: ResourceType,
         claim: Claim,
     ) -> Result<ResultResponse, Self::Err>;
 }
@@ -63,9 +66,9 @@ impl FromRow<'_, SqliteRow> for Resource {
     }
 }
 
-impl From<Resource> for shuttle_common::resource::Response {
+impl From<Resource> for ResourceInfo {
     fn from(resource: Resource) -> Self {
-        shuttle_common::resource::Response {
+        ResourceInfo {
             r#type: resource.r#type.into(),
             config: resource.config,
             data: resource.data,
@@ -84,7 +87,7 @@ pub enum Type {
     Custom,
 }
 
-impl From<Type> for CommonResourceType {
+impl From<Type> for ResourceType {
     fn from(r#type: Type) -> Self {
         match r#type {
             Type::Database(r#type) => Self::Database(r#type.into()),
@@ -98,16 +101,16 @@ impl From<Type> for CommonResourceType {
     }
 }
 
-impl From<CommonResourceType> for Type {
-    fn from(r#type: CommonResourceType) -> Self {
+impl From<ResourceType> for Type {
+    fn from(r#type: ResourceType) -> Self {
         match r#type {
-            CommonResourceType::Database(r#type) => Self::Database(r#type.into()),
-            CommonResourceType::Secrets => Self::Secrets,
-            CommonResourceType::StaticFolder => Self::StaticFolder,
-            CommonResourceType::Persist => Self::Persist,
-            CommonResourceType::Turso => Self::Turso,
-            CommonResourceType::Metadata => Self::Metadata,
-            CommonResourceType::Custom => Self::Custom,
+            ResourceType::Database(r#type) => Self::Database(r#type.into()),
+            ResourceType::Secrets => Self::Secrets,
+            ResourceType::StaticFolder => Self::StaticFolder,
+            ResourceType::Persist => Self::Persist,
+            ResourceType::Turso => Self::Turso,
+            ResourceType::Metadata => Self::Metadata,
+            ResourceType::Custom => Self::Custom,
         }
     }
 }

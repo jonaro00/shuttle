@@ -26,8 +26,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use shuttle_common::backends::headers::{X_SHUTTLE_ACCOUNT_NAME, X_SHUTTLE_ADMIN_SECRET};
 use shuttle_common::constants::{default_idle_minutes, DEFAULT_IDLE_MINUTES};
-use shuttle_common::models::project::ProjectName;
-use shuttle_common::models::service;
+use shuttle_common::models::project::{ProjectName, ProjectState};
+use shuttle_common::models::service::ServiceSummary;
 use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, instrument, trace, warn};
 use ulid::Ulid;
@@ -72,9 +72,9 @@ macro_rules! impl_from_variant {
 }
 
 const RUNTIME_API_PORT: u16 = 8001;
-const MAX_RECREATES: usize = 5;
-const MAX_RESTARTS: usize = 5;
-const MAX_REBOOTS: usize = 3;
+const MAX_RECREATES: u32 = 5;
+const MAX_RESTARTS: u32 = 5;
+const MAX_REBOOTS: u32 = 3;
 
 // Client used for health checks
 static CLIENT: Lazy<Client<HttpConnector>> = Lazy::new(Client::new);
@@ -115,13 +115,13 @@ pub trait ContainerInspectResponseExt {
         .map_err(|_| ProjectError::internal("invalid project id"))
     }
 
-    fn idle_minutes(&self) -> u64 {
+    fn idle_minutes(&self) -> u32 {
         let container = self.container();
 
         if let Some(config) = &container.config {
             if let Some(labels) = &config.labels {
                 if let Some(idle_minutes) = labels.get("shuttle.idle_minutes") {
-                    return idle_minutes.parse::<u64>().unwrap_or(DEFAULT_IDLE_MINUTES);
+                    return idle_minutes.parse::<u32>().unwrap_or(DEFAULT_IDLE_MINUTES);
                 }
             }
         }
@@ -410,12 +410,12 @@ impl Project {
         self.container().and_then(|container| container.id)
     }
 
-    pub fn idle_minutes(&self) -> Option<u64> {
+    pub fn idle_minutes(&self) -> Option<u32> {
         self.container().map(|container| container.idle_minutes())
     }
 }
 
-impl From<Project> for shuttle_common::models::project::State {
+impl From<Project> for ProjectState {
     fn from(project: Project) -> Self {
         match project {
             Project::Creating(ProjectCreating { recreate_count, .. }) => {
@@ -741,10 +741,10 @@ pub struct ProjectCreating {
     from: Option<ContainerInspectResponse>,
     // Use default for backward compatibility. Can be removed when all projects in the DB have this property set
     #[serde(default)]
-    recreate_count: usize,
+    recreate_count: u32,
     /// Label set on container as to how many minutes to wait before a project is considered idle
     #[serde(default = "default_idle_minutes")]
-    idle_minutes: u64,
+    idle_minutes: u32,
 }
 
 impl ProjectCreating {
@@ -752,7 +752,7 @@ impl ProjectCreating {
         project_name: ProjectName,
         project_id: Ulid,
         initial_key: String,
-        idle_minutes: u64,
+        idle_minutes: u32,
     ) -> Self {
         Self {
             project_name,
@@ -768,7 +768,7 @@ impl ProjectCreating {
 
     pub fn from_container(
         container: ContainerInspectResponse,
-        recreate_count: usize,
+        recreate_count: u32,
     ) -> Result<Self, ProjectError> {
         let project_name = container.project_name()?;
         let project_id = container.project_id()?;
@@ -800,7 +800,7 @@ impl ProjectCreating {
     pub fn new_with_random_initial_key(
         project_name: ProjectName,
         project_id: Ulid,
-        idle_minutes: u64,
+        idle_minutes: u32,
     ) -> Self {
         let initial_key = Alphanumeric.sample_string(&mut rand::thread_rng(), 32);
         Self::new(project_name, project_id, initial_key, idle_minutes)
@@ -983,7 +983,7 @@ pub struct ProjectAttaching {
     container: ContainerInspectResponse,
     // Use default for backward compatibility. Can be removed when all projects in the DB have this property set
     #[serde(default)]
-    recreate_count: usize,
+    recreate_count: u32,
 }
 
 #[async_trait]
@@ -1070,7 +1070,7 @@ where
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectRecreating {
     container: ContainerInspectResponse,
-    recreate_count: usize,
+    recreate_count: u32,
 }
 
 #[async_trait]
@@ -1121,7 +1121,7 @@ pub struct ProjectStarting {
     container: ContainerInspectResponse,
     // Use default for backward compatibility. Can be removed when all projects in the DB have this property set
     #[serde(default)]
-    restart_count: usize,
+    restart_count: u32,
 }
 
 #[async_trait]
@@ -1162,7 +1162,7 @@ where
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectRestarting {
     container: ContainerInspectResponse,
-    restart_count: usize,
+    restart_count: u32,
 }
 
 impl ProjectRestarting {
@@ -1171,7 +1171,7 @@ impl ProjectRestarting {
         Self::reached_max_restarts(self.restart_count)
     }
 
-    fn reached_max_restarts(restart_count: usize) -> bool {
+    fn reached_max_restarts(restart_count: u32) -> bool {
         restart_count >= MAX_RESTARTS
     }
 }
@@ -1224,7 +1224,7 @@ pub struct ProjectStarted {
     service: Option<Service>,
     // Use default for backward compatibility. Can be removed when all projects in the DB have this property set
     #[serde(default)]
-    start_count: usize,
+    start_count: u32,
     // Use default for backward compatibility. Can be removed when all projects in the DB have this property set
     #[serde(default, deserialize_with = "ok_or_default")]
     stats: VecDeque<u64>,
@@ -1233,7 +1233,7 @@ pub struct ProjectStarted {
 impl ProjectStarted {
     pub fn new(
         container: ContainerInspectResponse,
-        start_count: usize,
+        start_count: u32,
         stats: VecDeque<u64>,
     ) -> Self {
         Self {
@@ -1389,7 +1389,7 @@ where
                 stats,
             }));
         };
-        let cpu_per_minute = (new_stat - last) / idle_minutes;
+        let cpu_per_minute = (new_stat - last) / idle_minutes as u64;
 
         debug!(
             shuttle.container.id = container.id,
@@ -1551,7 +1551,7 @@ impl Service {
 
         let body = hyper::body::to_bytes(resp.into_body()).await?;
 
-        let service: service::Summary = serde_json::from_slice(&body)?;
+        let service: ServiceSummary = serde_json::from_slice(&body)?;
 
         if let Some(deployment) = service.deployment {
             Ok(Some(deployment.id))
@@ -1605,7 +1605,7 @@ where
             .try_collect::<Vec<_>>()
             .await?;
 
-        let start_event_count = start_events.len();
+        let start_event_count = start_events.len() as u32;
         debug!(
             "project started {} times in the last 15 minutes",
             start_event_count

@@ -18,7 +18,7 @@ use crossterm::{
 use futures::StreamExt;
 use portpicker::pick_unused_port;
 use shuttle_common::{
-    database::{AwsRdsEngine, SharedEngine},
+    database::{AwsRdsEngine, DatabaseType, SharedEngine},
     Secret,
 };
 use shuttle_proto::provisioner::{
@@ -26,7 +26,6 @@ use shuttle_proto::provisioner::{
     ContainerRequest, ContainerResponse, DatabaseDeletionResponse, DatabaseRequest,
     DatabaseResponse, Ping, Pong,
 };
-use shuttle_service::database::Type;
 use tokio::{task::JoinHandle, time::sleep};
 use tonic::{
     transport::{self, Server},
@@ -169,7 +168,7 @@ impl LocalProvisioner {
     async fn get_db_connection_string(
         &self,
         project_name: &str,
-        db_type: Type,
+        db_type: DatabaseType,
     ) -> Result<DatabaseResponse, Status> {
         trace!("getting sql string for project '{project_name}'");
 
@@ -332,7 +331,7 @@ impl Provisioner for LocalProvisioner {
             db_type,
         } = request.into_inner();
 
-        let db_type: Option<Type> = db_type.unwrap().into();
+        let db_type: Option<DatabaseType> = db_type.unwrap().into();
 
         let res = self
             .get_db_connection_string(&project_name, db_type.unwrap())
@@ -412,9 +411,9 @@ struct EngineConfig {
     is_ready_cmd: Vec<String>,
 }
 
-fn db_type_to_config(db_type: Type) -> EngineConfig {
+fn db_type_to_config(db_type: DatabaseType) -> EngineConfig {
     match db_type {
-        Type::Shared(SharedEngine::Postgres) => EngineConfig {
+        DatabaseType::Shared(SharedEngine::Postgres) => EngineConfig {
             r#type: "shared_postgres".to_string(),
             image: "docker.io/library/postgres:14".to_string(),
             engine: "postgres".to_string(),
@@ -429,7 +428,7 @@ fn db_type_to_config(db_type: Type) -> EngineConfig {
                 "pg_isready | grep 'accepting connections'".to_string(),
             ],
         },
-        Type::Shared(SharedEngine::MongoDb) => EngineConfig {
+        DatabaseType::Shared(SharedEngine::MongoDb) => EngineConfig {
             r#type: "shared_mongodb".to_string(),
             image: "docker.io/library/mongo:5.0.10".to_string(),
             engine: "mongodb".to_string(),
@@ -448,7 +447,7 @@ fn db_type_to_config(db_type: Type) -> EngineConfig {
                 "db".to_string(),
             ],
         },
-        Type::AwsRds(AwsRdsEngine::Postgres) => EngineConfig {
+        DatabaseType::AwsRds(AwsRdsEngine::Postgres) => EngineConfig {
             r#type: "aws_rds_postgres".to_string(),
             image: "docker.io/library/postgres:13.4".to_string(),
             engine: "postgres".to_string(),
@@ -463,7 +462,7 @@ fn db_type_to_config(db_type: Type) -> EngineConfig {
                 "pg_isready | grep 'accepting connections'".to_string(),
             ],
         },
-        Type::AwsRds(AwsRdsEngine::MariaDB) => EngineConfig {
+        DatabaseType::AwsRds(AwsRdsEngine::MariaDB) => EngineConfig {
             r#type: "aws_rds_mariadb".to_string(),
             image: "docker.io/library/mariadb:10.6.7".to_string(),
             engine: "mariadb".to_string(),
@@ -480,7 +479,7 @@ fn db_type_to_config(db_type: Type) -> EngineConfig {
                 "show databases;".to_string(),
             ],
         },
-        Type::AwsRds(AwsRdsEngine::MySql) => EngineConfig {
+        DatabaseType::AwsRds(AwsRdsEngine::MySql) => EngineConfig {
             r#type: "aws_rds_mysql".to_string(),
             image: "docker.io/library/mysql:8.0.28".to_string(),
             engine: "mysql".to_string(),

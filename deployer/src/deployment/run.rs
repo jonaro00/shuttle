@@ -10,12 +10,12 @@ use opentelemetry::global;
 use portpicker::pick_unused_port;
 use shuttle_common::{
     claims::{Claim, ClaimService, InjectPropagation},
-    constants::EXECUTABLE_DIRNAME,
-    deployment::{
+    constants::{
         DEPLOYER_END_MSG_COMPLETED, DEPLOYER_END_MSG_CRASHED, DEPLOYER_END_MSG_STARTUP_ERR,
-        DEPLOYER_END_MSG_STOPPED, DEPLOYER_RUNTIME_START_RESPONSE,
+        DEPLOYER_END_MSG_STOPPED, DEPLOYER_RUNTIME_START_RESPONSE, EXECUTABLE_DIRNAME,
     },
-    resource, SecretStore,
+    resource::{ResourceInfo, ResourceType},
+    SecretStore,
 };
 use shuttle_proto::{
     resource_recorder::record_request,
@@ -325,7 +325,7 @@ async fn load(
         .map_err(|err| Error::Load(err.to_string()))?
         .resources
         .into_iter()
-        .map(resource::Response::try_from)
+        .map(ResourceInfo::try_from)
         // We ignore and trace the errors for resources with corrupted data, returning just the
         // valid resources.
         // TODO: investigate how the resource data can get corrupted.
@@ -338,7 +338,7 @@ async fn load(
         })
         // inject old secrets into the secrets added in this deployment
         .inspect(|r| {
-            if r.r#type == shuttle_common::resource::Type::Secrets {
+            if r.r#type == ResourceType::Secrets {
                 match serde_json::from_value::<SecretStore>(r.data.clone()) {
                     Ok(ss) => {
                         // Combine old and new, but insert old first so that new ones override.
@@ -352,7 +352,7 @@ async fn load(
                 }
             }
         })
-        .map(resource::Response::into_bytes)
+        .map(ResourceInfo::into_bytes)
         .collect();
 
     let mut load_request = tonic::Request::new(LoadRequest {
@@ -383,7 +383,7 @@ async fn load(
                 .resources
                 .into_iter()
                 .map(|res| {
-                    let resource: resource::Response = serde_json::from_slice(&res).unwrap();
+                    let resource: ResourceInfo = serde_json::from_slice(&res).unwrap();
                     record_request::Resource {
                         r#type: resource.r#type.to_string(),
                         config: resource.config.to_string().into_bytes(),

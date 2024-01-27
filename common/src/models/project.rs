@@ -12,21 +12,23 @@ use serde::{Deserialize, Serialize};
 use strum::EnumString;
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct Response {
+#[typeshare::typeshare]
+pub struct ProjectInfo {
     pub id: String,
     pub name: String,
-    pub state: State,
-    pub idle_minutes: Option<u64>,
+    pub state: ProjectState,
+    pub idle_minutes: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, EnumString)]
-#[serde(rename_all = "lowercase")]
-pub enum State {
-    Creating { recreate_count: usize },
-    Attaching { recreate_count: usize },
-    Recreating { recreate_count: usize },
-    Starting { restart_count: usize },
-    Restarting { restart_count: usize },
+#[serde(rename_all = "lowercase", tag = "state", content = "content")]
+#[typeshare::typeshare]
+pub enum ProjectState {
+    Creating { recreate_count: u32 },
+    Attaching { recreate_count: u32 },
+    Recreating { recreate_count: u32 },
+    Starting { restart_count: u32 },
+    Restarting { restart_count: u32 },
     Started,
     Ready,
     Stopping,
@@ -38,7 +40,14 @@ pub enum State {
     Deleted,
 }
 
-impl PartialEq for State {
+/// Config when creating a new project
+#[derive(Deserialize, Serialize)]
+#[typeshare::typeshare]
+pub struct ProjectConfig {
+    pub idle_minutes: u32,
+}
+
+impl PartialEq for ProjectState {
     fn eq(&self, other: &Self) -> bool {
         matches!(
             (self, other),
@@ -55,13 +64,14 @@ impl PartialEq for State {
                 | (Self::Destroying, Self::Destroying)
                 | (Self::Destroyed, Self::Destroyed)
                 | (Self::Errored { .. }, Self::Errored { .. })
+                | (Self::Deleted, Self::Deleted)
         )
     }
 }
 
-impl Eq for State {}
+impl Eq for ProjectState {}
 
-impl Display for Response {
+impl Display for ProjectInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -75,60 +85,60 @@ impl Display for Response {
     }
 }
 
-impl Display for State {
+impl Display for ProjectState {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            State::Creating { recreate_count } => {
+            ProjectState::Creating { recreate_count } => {
                 if *recreate_count > 0 {
                     write!(f, "creating (attempt {})", recreate_count)
                 } else {
                     write!(f, "creating")
                 }
             }
-            State::Attaching { recreate_count } => {
+            ProjectState::Attaching { recreate_count } => {
                 if *recreate_count > 0 {
                     write!(f, "attaching (attempt {})", recreate_count)
                 } else {
                     write!(f, "attaching")
                 }
             }
-            State::Recreating { recreate_count } => {
+            ProjectState::Recreating { recreate_count } => {
                 if *recreate_count > 0 {
                     write!(f, "recreating (attempt {})", recreate_count)
                 } else {
                     write!(f, "recreating")
                 }
             }
-            State::Starting { restart_count } => {
+            ProjectState::Starting { restart_count } => {
                 if *restart_count > 0 {
                     write!(f, "starting (attempt {})", restart_count)
                 } else {
                     write!(f, "starting")
                 }
             }
-            State::Restarting { restart_count } => {
+            ProjectState::Restarting { restart_count } => {
                 if *restart_count > 0 {
                     write!(f, "restarting (attempt {})", restart_count)
                 } else {
                     write!(f, "restarting")
                 }
             }
-            State::Started => write!(f, "started"),
-            State::Ready => write!(f, "ready"),
-            State::Stopping => write!(f, "stopping"),
-            State::Stopped => write!(f, "stopped"),
-            State::Rebooting => write!(f, "rebooting"),
-            State::Destroying => write!(f, "destroying"),
-            State::Destroyed => write!(f, "destroyed"),
-            State::Errored { message } => {
+            ProjectState::Started => write!(f, "started"),
+            ProjectState::Ready => write!(f, "ready"),
+            ProjectState::Stopping => write!(f, "stopping"),
+            ProjectState::Stopped => write!(f, "stopped"),
+            ProjectState::Rebooting => write!(f, "rebooting"),
+            ProjectState::Destroying => write!(f, "destroying"),
+            ProjectState::Destroyed => write!(f, "destroyed"),
+            ProjectState::Errored { message } => {
                 write!(f, "errored (message: {message})")
             }
-            State::Deleted => write!(f, "deleted"),
+            ProjectState::Deleted => write!(f, "deleted"),
         }
     }
 }
 
-impl State {
+impl ProjectState {
     /// We return a &str rather than a Color here, since `comfy-table` re-exports
     /// crossterm::style::Color and we depend on both `comfy-table` and `crossterm`
     /// we may end up with two different versions of Color.
@@ -137,12 +147,12 @@ impl State {
             Self::Creating { recreate_count }
             | Self::Attaching { recreate_count }
             | Self::Recreating { recreate_count }
-                if recreate_count > &0usize =>
+                if recreate_count > &0u32 =>
             {
                 "dark_yellow"
             }
             Self::Starting { restart_count } | Self::Restarting { restart_count }
-                if restart_count > &0usize =>
+                if restart_count > &0u32 =>
             {
                 "dark_yellow"
             }
@@ -158,14 +168,8 @@ impl State {
     }
 }
 
-/// Config when creating a new project
-#[derive(Deserialize, Serialize)]
-pub struct Config {
-    pub idle_minutes: u64,
-}
-
 pub fn get_projects_table(
-    projects: &Vec<Response>,
+    projects: &Vec<ProjectInfo>,
     page: u32,
     raw: bool,
     page_hint: bool,

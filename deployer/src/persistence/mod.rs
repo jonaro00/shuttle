@@ -7,7 +7,7 @@ use error::{Error, Result};
 use hyper::Uri;
 use shuttle_common::{
     claims::{Claim, ClaimLayer, InjectPropagationLayer},
-    resource::Type,
+    resource::ResourceType,
 };
 use shuttle_proto::{
     provisioner::{provisioner_client::ProvisionerClient, DatabaseRequest},
@@ -38,7 +38,7 @@ mod user;
 pub use self::deployment::{Deployment, DeploymentUpdater};
 pub use self::error::Error as PersistenceError;
 pub use self::service::Service;
-pub use self::state::DeploymentState;
+pub use self::state::DeploymentStateUpdate;
 pub use self::state::{State, StateRecorder};
 pub use self::user::User;
 use self::{
@@ -53,7 +53,7 @@ pub static MIGRATIONS: Migrator = sqlx::migrate!("./migrations");
 #[derive(Clone)]
 pub struct Persistence {
     pool: SqlitePool,
-    state_send: tokio::sync::mpsc::UnboundedSender<DeploymentState>,
+    state_send: tokio::sync::mpsc::UnboundedSender<DeploymentStateUpdate>,
     resource_recorder_client: Option<
         ResourceRecorderClient<
             shuttle_common::claims::ClaimService<
@@ -189,14 +189,14 @@ impl Persistence {
     async fn from_pool(
         pool: SqlitePool,
     ) -> (
-        tokio::sync::mpsc::UnboundedSender<DeploymentState>,
+        tokio::sync::mpsc::UnboundedSender<DeploymentStateUpdate>,
         JoinHandle<()>,
     ) {
         MIGRATIONS.run(&pool).await.unwrap();
 
         // Unbounded channel so that sync code (tracing layer) can send to async listener (here)
         let (state_send, mut state_recv) =
-            tokio::sync::mpsc::unbounded_channel::<DeploymentState>();
+            tokio::sync::mpsc::unbounded_channel::<DeploymentStateUpdate>();
 
         let handle = tokio::spawn(async move {
             while let Some(state) = state_recv.recv().await {
@@ -368,7 +368,7 @@ impl Persistence {
     pub async fn stop_running_deployment(&self, deployable: DeploymentRunnable) -> Result<()> {
         update_deployment(
             &self.pool,
-            DeploymentState {
+            DeploymentStateUpdate {
                 id: deployable.id,
                 state: State::Stopped,
             },
@@ -377,7 +377,7 @@ impl Persistence {
     }
 }
 
-async fn update_deployment(pool: &SqlitePool, state: DeploymentState) -> Result<()> {
+async fn update_deployment(pool: &SqlitePool, state: DeploymentStateUpdate) -> Result<()> {
     sqlx::query("UPDATE deployments SET state = ?, last_update = ? WHERE id = ?")
         .bind(state.state)
         .bind(Utc::now())
@@ -515,7 +515,7 @@ impl ResourceManager for Persistence {
     async fn get_resource(
         &mut self,
         service_id: &Ulid,
-        r#type: shuttle_common::resource::Type,
+        r#type: ResourceType,
         claim: Claim,
     ) -> Result<ResourceResponse> {
         let mut get_resource_req = tonic::Request::new(ResourceIds {
@@ -540,10 +540,10 @@ impl ResourceManager for Persistence {
         &mut self,
         project_name: String,
         service_id: &Ulid,
-        resource_type: shuttle_common::resource::Type,
+        resource_type: ResourceType,
         claim: Claim,
     ) -> Result<ResultResponse> {
-        if let Type::Database(db_type) = resource_type {
+        if let ResourceType::Database(db_type) = resource_type {
             let proto_db_type: shuttle_proto::provisioner::database_request::DbType =
                 db_type.into();
             if let Some(inner) = &mut self.provisioner_client {
@@ -666,7 +666,7 @@ impl ActiveDeploymentsGetter for Persistence {
 impl StateRecorder for Persistence {
     type Err = Error;
 
-    fn record_state(&self, state: DeploymentState) -> Result<()> {
+    fn record_state(&self, state: DeploymentStateUpdate) -> Result<()> {
         self.state_send
             .send(state)
             .map_err(|_| Error::ChannelSendThreadError)
@@ -706,7 +706,7 @@ mod tests {
 
         update_deployment(
             &p.pool,
-            DeploymentState {
+            DeploymentStateUpdate {
                 id,
                 state: State::Built,
             },

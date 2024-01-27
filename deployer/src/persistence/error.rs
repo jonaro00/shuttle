@@ -1,4 +1,4 @@
-use super::DeploymentState;
+use super::DeploymentStateUpdate;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -9,7 +9,7 @@ pub enum Error {
     #[error("Resource recorder sync error")]
     ResourceRecorderSync,
     #[error("Sending the state event failed: {0}")]
-    ChannelSendError(#[from] tokio::sync::mpsc::error::SendError<DeploymentState>),
+    ChannelSendError(#[from] tokio::sync::mpsc::error::SendError<DeploymentStateUpdate>),
     #[error("Sending the state event failed: channel closed")]
     ChannelSendThreadError,
     #[error("Parsing error: {0}")]

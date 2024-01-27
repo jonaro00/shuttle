@@ -3,21 +3,21 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
-use shuttle_common::resource::{self, Type};
+use shuttle_common::resource::{ResourceInfo, ResourceType};
 use shuttle_service::{IntoResource, ResourceBuilder};
 
 use crate::__internals::ProvisionerFactory;
 
 /// Used to keep track of which resources have been provisioned in the past and what is being provisioned for this deployment
 pub struct ResourceTracker {
-    past_resources: Vec<resource::Response>,
-    new_resources: Arc<Mutex<Vec<resource::Response>>>,
+    past_resources: Vec<ResourceInfo>,
+    new_resources: Arc<Mutex<Vec<ResourceInfo>>>,
 }
 
 impl ResourceTracker {
     pub fn new(
-        past_resources: Vec<resource::Response>,
-        new_resources: Arc<Mutex<Vec<resource::Response>>>,
+        past_resources: Vec<ResourceInfo>,
+        new_resources: Arc<Mutex<Vec<ResourceInfo>>>,
     ) -> Self {
         Self {
             past_resources,
@@ -26,7 +26,7 @@ impl ResourceTracker {
     }
 
     /// Get the output of a resource that has been constructed in the past if it exists
-    pub fn get_cached_output(&self, r#type: Type, config: &Value) -> Option<Value> {
+    pub fn get_cached_output(&self, r#type: ResourceType, config: &Value) -> Option<Value> {
         // Secrets are returning unit configs, which deserialised come as a `serde_json::Value::Null`.
         // We always return the cached output for them, even if they change from a previous deployment.
         // We have to always call `output()` on them to get the latest secrets, since we don't track a
@@ -42,11 +42,11 @@ impl ResourceTracker {
     }
 
     /// Record a resource that has been requested
-    pub fn record_resource(&mut self, r#type: Type, config: Value, output: Value) {
+    pub fn record_resource(&mut self, r#type: ResourceType, config: Value, output: Value) {
         self.new_resources
             .lock()
             .expect("to get lock on new resources")
-            .push(resource::Response {
+            .push(ResourceInfo {
                 r#type,
                 config,
                 data: output,

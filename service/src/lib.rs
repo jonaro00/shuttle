@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
 pub use shuttle_common::{
     database,
-    deployment::{DeploymentMetadata, Environment},
-    resource,
+    models::deployment::{DeploymentMetadata, Environment},
+    resource::ResourceType,
     secrets::Secret,
     DatabaseInfo, DatabaseResource, DbInput, SecretStore,
 };
@@ -26,7 +26,7 @@ pub trait Factory: Send + Sync {
     /// Provision a Shuttle database and get the connection information
     async fn get_db_connection(
         &mut self,
-        db_type: database::Type,
+        db_type: database::DatabaseType,
     ) -> Result<DatabaseInfo, crate::Error>;
 
     /// Start a Docker container. Only used in local runs.
@@ -61,7 +61,7 @@ pub trait ResourceBuilder: Default {
     /// The type of resource this plugin creates.
     /// If dealing with a Shuttle-provisioned resource, such as a database, use the corresponding variant.
     /// Otherwise, use the `Custom` variant.
-    const TYPE: resource::Type;
+    const TYPE: ResourceType;
 
     /// The input config to this resource.
     type Config: Serialize;

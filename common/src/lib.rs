@@ -5,8 +5,6 @@ pub mod claims;
 pub mod constants;
 pub mod database;
 #[cfg(feature = "service")]
-pub mod deployment;
-#[cfg(feature = "service")]
 use uuid::Uuid;
 #[cfg(feature = "service")]
 pub type DeploymentId = Uuid;

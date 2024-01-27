@@ -6,10 +6,13 @@ use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, RequestBuilder};
 use reqwest_retry::policies::ExponentialBackoff;
 use reqwest_retry::RetryTransientMiddleware;
 use serde::{Deserialize, Serialize};
-use shuttle_common::models::deployment::DeploymentRequest;
-use shuttle_common::models::{deployment, project, service, ToJson};
+use shuttle_common::models::deployment::{DeploymentInfo, DeploymentRequest};
+use shuttle_common::models::project::{ProjectConfig, ProjectInfo};
+use shuttle_common::models::service::ServiceSummary;
+use shuttle_common::models::ToJson;
+use shuttle_common::resource::{ResourceInfo, ResourceType};
 use shuttle_common::secrets::Secret;
-use shuttle_common::{resource, ApiKey, ApiUrl, LogItem, VersionInfo};
+use shuttle_common::{ApiKey, ApiUrl, LogItem, VersionInfo};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
@@ -73,7 +76,7 @@ impl Client {
         &self,
         project: &str,
         deployment_req: DeploymentRequest,
-    ) -> Result<deployment::Response> {
+    ) -> Result<DeploymentInfo> {
         let path = format!("/projects/{project}/services/{project}");
         let deployment_req = rmp_serde::to_vec(&deployment_req)
             .context("serialize DeploymentRequest as a MessagePack byte vector")?;
@@ -92,19 +95,19 @@ impl Client {
             .await
     }
 
-    pub async fn stop_service(&self, project: &str) -> Result<service::Summary> {
+    pub async fn stop_service(&self, project: &str) -> Result<ServiceSummary> {
         let path = format!("/projects/{project}/services/{project}");
 
         self.delete(path).await
     }
 
-    pub async fn get_service(&self, project: &str) -> Result<service::Summary> {
+    pub async fn get_service(&self, project: &str) -> Result<ServiceSummary> {
         let path = format!("/projects/{project}/services/{project}");
 
         self.get(path).await
     }
 
-    pub async fn get_service_resources(&self, project: &str) -> Result<Vec<resource::Response>> {
+    pub async fn get_service_resources(&self, project: &str) -> Result<Vec<ResourceInfo>> {
         let path = format!("/projects/{project}/services/{project}/resources");
 
         self.get(path).await
@@ -113,7 +116,7 @@ impl Client {
     pub async fn delete_service_resource(
         &self,
         project: &str,
-        resource_type: &resource::Type,
+        resource_type: &ResourceType,
     ) -> Result<()> {
         let path = format!(
             "/projects/{project}/services/{project}/resources/{}",
@@ -129,8 +132,8 @@ impl Client {
     pub async fn create_project(
         &self,
         project: &str,
-        config: &project::Config,
-    ) -> Result<project::Response> {
+        config: &ProjectConfig,
+    ) -> Result<ProjectInfo> {
         let path = format!("/projects/{project}");
 
         self.post(path, Some(config))
@@ -150,19 +153,19 @@ impl Client {
             .await
     }
 
-    pub async fn get_project(&self, project: &str) -> Result<project::Response> {
+    pub async fn get_project(&self, project: &str) -> Result<ProjectInfo> {
         let path = format!("/projects/{project}");
 
         self.get(path).await
     }
 
-    pub async fn get_projects_list(&self, page: u32, limit: u32) -> Result<Vec<project::Response>> {
+    pub async fn get_projects_list(&self, page: u32, limit: u32) -> Result<Vec<ProjectInfo>> {
         let path = format!("/projects?page={}&limit={}", page.saturating_sub(1), limit);
 
         self.get(path).await
     }
 
-    pub async fn stop_project(&self, project: &str) -> Result<project::Response> {
+    pub async fn stop_project(&self, project: &str) -> Result<ProjectInfo> {
         let path = format!("/projects/{project}");
 
         self.delete(path).await
@@ -197,7 +200,7 @@ impl Client {
         project: &str,
         page: u32,
         limit: u32,
-    ) -> Result<Vec<deployment::Response>> {
+    ) -> Result<Vec<DeploymentInfo>> {
         let path = format!(
             "/projects/{project}/deployments?page={}&limit={}",
             page.saturating_sub(1),
@@ -211,7 +214,7 @@ impl Client {
         &self,
         project: &str,
         deployment_id: &Uuid,
-    ) -> Result<deployment::Response> {
+    ) -> Result<DeploymentInfo> {
         let path = format!("/projects/{project}/deployments/{deployment_id}");
 
         self.get(path).await

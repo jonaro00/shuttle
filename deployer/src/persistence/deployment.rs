@@ -2,6 +2,7 @@ use std::{net::SocketAddr, str::FromStr};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use shuttle_common::models::deployment::DeploymentInfo;
 use sqlx::{sqlite::SqliteRow, FromRow, Row};
 use tracing::error;
 use ulid::Ulid;
@@ -54,9 +55,9 @@ impl FromRow<'_, SqliteRow> for Deployment {
     }
 }
 
-impl From<Deployment> for shuttle_common::models::deployment::Response {
+impl From<Deployment> for DeploymentInfo {
     fn from(deployment: Deployment) -> Self {
-        shuttle_common::models::deployment::Response {
+        DeploymentInfo {
             id: deployment.id,
             service_id: deployment.service_id.to_string(),
             state: deployment.state.into(),

@@ -28,7 +28,7 @@ use shuttle_common::{
     LogItem,
 };
 
-use crate::persistence::{DeploymentState, State, StateRecorder};
+use crate::persistence::{DeploymentStateUpdate, State, StateRecorder};
 
 /// Tracing subscriber layer which keeps track of a deployment's state.
 /// Logs a special line when entering a span tagged with deployment id and state.
@@ -67,7 +67,7 @@ where
         }
 
         // To deployer persistence
-        let res = self.state_recorder.record_state(DeploymentState {
+        let res = self.state_recorder.record_state(DeploymentStateUpdate {
             id: visitor.deployment_id,
             state: visitor.state,
         });
@@ -137,7 +137,7 @@ mod tests {
 
     use crate::{
         persistence::{
-            resource::ResourceManager, DeploymentState, DeploymentUpdater, StateRecorder,
+            resource::ResourceManager, DeploymentStateUpdate, DeploymentUpdater, StateRecorder,
         },
         RuntimeManager,
     };
@@ -146,7 +146,7 @@ mod tests {
     use ctor::ctor;
     use flate2::{write::GzEncoder, Compression};
     use portpicker::pick_unused_port;
-    use shuttle_common::claims::Claim;
+    use shuttle_common::{claims::Claim, resource::ResourceType};
     use shuttle_common_tests::{builder::mocked_builder_client, logger::mocked_logger_client};
     use shuttle_proto::{
         builder::{builder_server::Builder, BuildRequest, BuildResponse},
@@ -242,8 +242,8 @@ mod tests {
         state: State,
     }
 
-    impl From<DeploymentState> for MockStateLog {
-        fn from(log: DeploymentState) -> Self {
+    impl From<DeploymentStateUpdate> for MockStateLog {
+        fn from(log: DeploymentStateUpdate) -> Self {
             Self {
                 id: log.id,
                 state: log.state,
@@ -289,7 +289,7 @@ mod tests {
     impl StateRecorder for RecorderMock {
         type Err = MockError;
 
-        fn record_state(&self, event: DeploymentState) -> Result<(), MockError> {
+        fn record_state(&self, event: DeploymentStateUpdate) -> Result<(), MockError> {
             self.states.lock().unwrap().push(event.into());
             Ok(())
         }
@@ -464,7 +464,7 @@ mod tests {
         async fn get_resource(
             &mut self,
             _service_id: &ulid::Ulid,
-            _type: shuttle_common::resource::Type,
+            _type: ResourceType,
             _claim: Claim,
         ) -> Result<ResourceResponse, Self::Err> {
             Ok(ResourceResponse {
@@ -478,7 +478,7 @@ mod tests {
             &mut self,
             _project_name: String,
             _service_id: &ulid::Ulid,
-            _type: shuttle_common::resource::Type,
+            _type: ResourceType,
             _claim: Claim,
         ) -> Result<ResultResponse, Self::Err> {
             Ok(ResultResponse {

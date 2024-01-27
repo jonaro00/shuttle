@@ -6,7 +6,7 @@ use hyper::Body;
 use serde::de::DeserializeOwned;
 use shuttle_common::{
     models::{deployment, error::ErrorKind, project::ProjectName},
-    resource,
+    resource::ResourceInfo,
 };
 use uuid::Uuid;
 
@@ -85,7 +85,7 @@ impl ProjectCaller {
     }
 
     /// Get the deployments for the project
-    pub async fn get_deployment_list(&self) -> Result<Vec<deployment::Response>, Error> {
+    pub async fn get_deployment_list(&self) -> Result<Vec<deployment::DeploymentInfo>, Error> {
         let project_name = &self.project_name;
 
         let deployments = self
@@ -110,7 +110,7 @@ impl ProjectCaller {
     }
 
     /// Get all the resources the project is using
-    pub async fn get_resources(&self) -> Result<Vec<resource::Response>, Error> {
+    pub async fn get_resources(&self) -> Result<Vec<ResourceInfo>, Error> {
         let project_name = &self.project_name;
 
         let resources = self

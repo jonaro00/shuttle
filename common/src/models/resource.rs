@@ -8,13 +8,13 @@ use comfy_table::{
 use crossterm::style::Stylize;
 
 use crate::{
-    resource::{Response, Type},
+    resource::{ResourceInfo, ResourceType},
     secrets::SecretStore,
     DatabaseResource,
 };
 
 pub fn get_resource_tables(
-    resources: &Vec<Response>,
+    resources: &Vec<ResourceInfo>,
     service_name: &str,
     raw: bool,
     show_secrets: bool,
@@ -28,13 +28,13 @@ pub fn get_resource_tables(
     } else {
         let resource_groups = resources.iter().fold(HashMap::new(), |mut acc, x| {
             let title = match x.r#type {
-                Type::Database(_) => "Databases",
-                Type::Secrets => "Secrets",
-                Type::StaticFolder => "Static Folder",
-                Type::Persist => "Persist",
-                Type::Turso => "Turso",
-                Type::Metadata => "Metadata",
-                Type::Custom => "Custom",
+                ResourceType::Database(_) => "Databases",
+                ResourceType::Secrets => "Secrets",
+                ResourceType::StaticFolder => "Static Folder",
+                ResourceType::Persist => "Persist",
+                ResourceType::Turso => "Turso",
+                ResourceType::Metadata => "Metadata",
+                ResourceType::Custom => "Custom",
             };
 
             let elements: &mut Vec<_> = acc.entry(title).or_default();
@@ -75,7 +75,7 @@ pub fn get_resource_tables(
 }
 
 fn get_databases_table(
-    databases: &Vec<&Response>,
+    databases: &Vec<&ResourceInfo>,
     service_name: &str,
     raw: bool,
     show_secrets: bool,
@@ -147,7 +147,7 @@ fn get_databases_table(
     format!("These databases are linked to {service_name}\n{table}\n{show_secret_hint}")
 }
 
-fn get_secrets_table(secrets: &[&Response], service_name: &str, raw: bool) -> String {
+fn get_secrets_table(secrets: &[&ResourceInfo], service_name: &str, raw: bool) -> String {
     let mut table = Table::new();
 
     if raw {
@@ -172,7 +172,11 @@ fn get_secrets_table(secrets: &[&Response], service_name: &str, raw: bool) -> St
     format!("These secrets can be accessed by {service_name}\n{table}\n")
 }
 
-fn get_static_folder_table(static_folders: &[&Response], service_name: &str, raw: bool) -> String {
+fn get_static_folder_table(
+    static_folders: &[&ResourceInfo],
+    service_name: &str,
+    raw: bool,
+) -> String {
     let mut table = Table::new();
 
     if raw {
@@ -197,7 +201,7 @@ fn get_static_folder_table(static_folders: &[&Response], service_name: &str, raw
     format!("These static folders can be accessed by {service_name}\n{table}\n")
 }
 
-fn get_persist_table(persist_instances: &[&Response], service_name: &str, raw: bool) -> String {
+fn get_persist_table(persist_instances: &[&ResourceInfo], service_name: &str, raw: bool) -> String {
     let mut table = Table::new();
 
     if raw {
@@ -221,7 +225,7 @@ fn get_persist_table(persist_instances: &[&Response], service_name: &str, raw: b
 }
 
 fn get_custom_resources_table(
-    custom_resource_instances: &[&Response],
+    custom_resource_instances: &[&ResourceInfo],
     service_name: &str,
     raw: bool,
 ) -> String {

@@ -7,7 +7,7 @@ use std::{
 use anyhow::Context;
 use shuttle_common::{
     claims::{ClaimLayer, ClaimService, InjectPropagation, InjectPropagationLayer},
-    deployment::Environment,
+    models::deployment::Environment,
 };
 use shuttle_proto::runtime::runtime_client;
 use shuttle_proto::tonic::transport::{Channel, Endpoint};

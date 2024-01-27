@@ -7,7 +7,7 @@ use std::{
 
 use async_trait::async_trait;
 use portpicker::pick_unused_port;
-use shuttle_common::{claims::Claim, constants::EXECUTABLE_DIRNAME};
+use shuttle_common::{claims::Claim, constants::EXECUTABLE_DIRNAME, resource::ResourceType};
 use shuttle_common_tests::logger::{mocked_logger_client, MockedLogger};
 use shuttle_proto::{
     logger::Batcher,
@@ -124,7 +124,7 @@ impl ResourceManager for StubResourceManager {
         &mut self,
         _project_name: String,
         _service_id: &Ulid,
-        _resource_type: shuttle_common::resource::Type,
+        _resource_type: ResourceType,
         _claim: Claim,
     ) -> Result<ResultResponse, Self::Err> {
         Ok(ResultResponse {
@@ -136,7 +136,7 @@ impl ResourceManager for StubResourceManager {
     async fn get_resource(
         &mut self,
         _service_id: &ulid::Ulid,
-        _resource_type: shuttle_common::resource::Type,
+        _resource_type: ResourceType,
         _claim: Claim,
     ) -> Result<ResourceResponse, Self::Err> {
         Ok(ResourceResponse {

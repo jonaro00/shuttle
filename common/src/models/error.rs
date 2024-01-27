@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
 #[derive(Serialize, Deserialize, Debug)]
+#[typeshare::typeshare]
 pub struct ApiError {
     pub message: String,
     pub status_code: u16,

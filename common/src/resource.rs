@@ -3,13 +3,13 @@ use std::{fmt::Display, str::FromStr};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::database;
+use crate::database::DatabaseType;
 
 /// Common type to hold all the information we need for a generic resource
 #[derive(Clone, Deserialize, Serialize)]
-pub struct Response {
+pub struct ResourceInfo {
     /// The type of this resource.
-    pub r#type: Type,
+    pub r#type: ResourceType,
 
     /// The config used when creating this resource. Use the [Self::r#type] to know how to parse this data.
     pub config: Value,
@@ -20,8 +20,8 @@ pub struct Response {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum Type {
-    Database(database::Type),
+pub enum ResourceType {
+    Database(DatabaseType),
     Secrets,
     StaticFolder,
     Persist,
@@ -30,13 +30,13 @@ pub enum Type {
     Custom,
 }
 
-impl FromStr for Type {
+impl FromStr for ResourceType {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some((prefix, rest)) = s.split_once("::") {
             match prefix {
-                "database" => Ok(Self::Database(database::Type::from_str(rest)?)),
+                "database" => Ok(Self::Database(DatabaseType::from_str(rest)?)),
                 _ => Err(format!("'{prefix}' is an unknown resource type")),
             }
         } else {
@@ -53,7 +53,7 @@ impl FromStr for Type {
     }
 }
 
-impl Response {
+impl ResourceInfo {
     pub fn into_bytes(self) -> Vec<u8> {
         self.to_bytes()
     }
@@ -67,16 +67,16 @@ impl Response {
     }
 }
 
-impl Display for Type {
+impl Display for ResourceType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Database(db_type) => write!(f, "database::{db_type}"),
-            Type::Secrets => write!(f, "secrets"),
-            Type::StaticFolder => write!(f, "static_folder"),
-            Type::Persist => write!(f, "persist"),
-            Type::Turso => write!(f, "turso"),
-            Type::Metadata => write!(f, "metadata"),
-            Type::Custom => write!(f, "custom"),
+            ResourceType::Database(db_type) => write!(f, "database::{db_type}"),
+            ResourceType::Secrets => write!(f, "secrets"),
+            ResourceType::StaticFolder => write!(f, "static_folder"),
+            ResourceType::Persist => write!(f, "persist"),
+            ResourceType::Turso => write!(f, "turso"),
+            ResourceType::Metadata => write!(f, "metadata"),
+            ResourceType::Custom => write!(f, "custom"),
         }
     }
 }

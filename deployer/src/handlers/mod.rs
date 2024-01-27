@@ -29,12 +29,16 @@ use shuttle_common::{
         metrics::{Metrics, TraceLayer},
     },
     claims::{Claim, Scope},
+    constants::{CREATE_SERVICE_BODY_LIMIT, GIT_STRINGS_MAX_LENGTH},
     models::{
-        deployment::{DeploymentRequest, CREATE_SERVICE_BODY_LIMIT, GIT_STRINGS_MAX_LENGTH},
+        deployment::DeploymentRequest,
         error::axum::CustomErrorPath,
         project::ProjectName,
+        service::{ServiceResponse, ServiceSummary},
     },
-    request_span, LogItem,
+    request_span,
+    resource::{ResourceInfo, ResourceType},
+    LogItem,
 };
 use shuttle_proto::logger::LogsRequest;
 
@@ -184,7 +188,7 @@ impl RouterBuilder {
 #[instrument(skip_all)]
 pub async fn get_services(
     Extension(persistence): Extension<Persistence>,
-) -> Result<Json<Vec<shuttle_common::models::service::Response>>> {
+) -> Result<Json<Vec<ServiceResponse>>> {
     let services = persistence
         .get_all_services()
         .await?
@@ -200,14 +204,14 @@ pub async fn get_service(
     Extension(persistence): Extension<Persistence>,
     Extension(proxy_fqdn): Extension<FQDN>,
     CustomErrorPath((project_name, service_name)): CustomErrorPath<(String, String)>,
-) -> Result<Json<shuttle_common::models::service::Summary>> {
+) -> Result<Json<ServiceSummary>> {
     if let Some(service) = persistence.get_service_by_name(&service_name).await? {
         let deployment = persistence
             .get_active_deployment(&service.id)
             .await?
             .map(Into::into);
 
-        let response = shuttle_common::models::service::Summary {
+        let response = ServiceSummary {
             uri: format!("https://{proxy_fqdn}"),
             name: service.name,
             deployment,
@@ -224,14 +228,14 @@ pub async fn get_service_resources(
     Extension(mut persistence): Extension<Persistence>,
     Extension(claim): Extension<Claim>,
     CustomErrorPath((project_name, service_name)): CustomErrorPath<(String, String)>,
-) -> Result<Json<Vec<shuttle_common::resource::Response>>> {
+) -> Result<Json<Vec<ResourceInfo>>> {
     if let Some(service) = persistence.get_service_by_name(&service_name).await? {
         let resources = persistence
             .get_resources(&service.id, claim)
             .await?
             .resources
             .into_iter()
-            .map(shuttle_common::resource::Response::try_from)
+            .map(ResourceInfo::try_from)
             // We ignore and trace the errors for resources with corrupted data, returning just the
             // valid resources.
             // TODO: investigate how the resource data can get corrupted.
@@ -266,12 +270,10 @@ pub async fn delete_service_resource(
         .ok_or_else(|| Error::NotFound("service not found".to_string()))?;
 
     let r#type =
-        shuttle_common::resource::Type::from_str(resource_type.as_str()).map_err(|err| {
-            error::Error::Convert {
-                from: "str".to_string(),
-                to: "shuttle_common::resource::Type".to_string(),
-                message: format!("Not a valid resource type representation: {}", err).to_string(),
-            }
+        ResourceType::from_str(resource_type.as_str()).map_err(|err| error::Error::Convert {
+            from: "str".to_string(),
+            to: "shuttle_common::models::ResourceType".to_string(),
+            message: format!("Not a valid resource type representation: {}", err).to_string(),
         })?;
 
     let get_resource_response = persistence
@@ -300,7 +302,7 @@ pub async fn create_service(
     Extension(claim): Extension<Claim>,
     CustomErrorPath((project_name, service_name)): CustomErrorPath<(String, String)>,
     Rmp(deployment_req): Rmp<DeploymentRequest>,
-) -> Result<Json<shuttle_common::models::deployment::Response>> {
+) -> Result<Json<shuttle_common::models::deployment::DeploymentInfo>> {
     let id = Uuid::new_v4();
     let now = Utc::now();
 
@@ -364,7 +366,7 @@ pub async fn stop_service(
     Extension(deployment_manager): Extension<DeploymentManager>,
     Extension(proxy_fqdn): Extension<FQDN>,
     CustomErrorPath((project_name, service_name)): CustomErrorPath<(String, String)>,
-) -> Result<Json<shuttle_common::models::service::Summary>> {
+) -> Result<Json<ServiceSummary>> {
     let Some(service) = persistence.get_service_by_name(&service_name).await? else {
         return Err(Error::NotFound("service not found".to_string()));
     };
@@ -374,7 +376,7 @@ pub async fn stop_service(
     };
     deployment_manager.kill(deployment.id).await;
 
-    let response = shuttle_common::models::service::Summary {
+    let response = ServiceSummary {
         name: service.name,
         deployment: running_deployment.map(Into::into),
         uri: format!("https://{proxy_fqdn}"),
@@ -388,7 +390,7 @@ pub async fn get_deployments(
     Extension(persistence): Extension<Persistence>,
     CustomErrorPath(project_name): CustomErrorPath<String>,
     Query(PaginationDetails { page, limit }): Query<PaginationDetails>,
-) -> Result<Json<Vec<shuttle_common::models::deployment::Response>>> {
+) -> Result<Json<Vec<shuttle_common::models::deployment::DeploymentInfo>>> {
     if let Some(service) = persistence.get_service_by_name(&project_name).await? {
         let limit = limit.unwrap_or(u32::MAX);
         let page = page.unwrap_or(0);
@@ -409,7 +411,7 @@ pub async fn get_deployments(
 pub async fn get_deployment(
     Extension(persistence): Extension<Persistence>,
     CustomErrorPath((project_name, deployment_id)): CustomErrorPath<(String, Uuid)>,
-) -> Result<Json<shuttle_common::models::deployment::Response>> {
+) -> Result<Json<shuttle_common::models::deployment::DeploymentInfo>> {
     if let Some(deployment) = persistence.get_deployment(&deployment_id).await? {
         Ok(Json(deployment.into()))
     } else {
@@ -422,7 +424,7 @@ pub async fn delete_deployment(
     Extension(deployment_manager): Extension<DeploymentManager>,
     Extension(persistence): Extension<Persistence>,
     CustomErrorPath((project_name, deployment_id)): CustomErrorPath<(String, Uuid)>,
-) -> Result<Json<shuttle_common::models::deployment::Response>> {
+) -> Result<Json<shuttle_common::models::deployment::DeploymentInfo>> {
     if let Some(deployment) = persistence.get_deployment(&deployment_id).await? {
         deployment_manager.kill(deployment.id).await;
 

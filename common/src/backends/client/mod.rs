@@ -95,7 +95,7 @@ mod tests {
     use headers::{authorization::Bearer, Authorization};
     use http::{Method, StatusCode};
 
-    use crate::models;
+    use crate::models::project::ProjectInfo;
     use crate::test_utils::mocked_gateway_server;
 
     use super::{Error, ServicesApiClient};
@@ -108,7 +108,7 @@ mod tests {
         let client = ServicesApiClient::new(server.uri().parse().unwrap());
 
         let err = client
-            .request::<_, Vec<models::project::Response>, _>(
+            .request::<_, Vec<ProjectInfo>, _>(
                 Method::GET,
                 "projects",
                 None::<()>,

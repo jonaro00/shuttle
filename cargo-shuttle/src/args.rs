@@ -12,8 +12,10 @@ use clap::{
     Parser, ValueEnum,
 };
 use clap_complete::Shell;
-use shuttle_common::constants::DEFAULT_IDLE_MINUTES;
-use shuttle_common::resource;
+use shuttle_common::{
+    constants::{DEFAULT_IDLE_MINUTES, SHUTTLE_EXAMPLES_REPO},
+    resource::ResourceType,
+};
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -193,7 +195,7 @@ pub enum ResourceCommand {
         /// Type of the resource to delete.
         /// Use the string in the 'Type' column as displayed in the `resource list` command.
         /// For example, 'database::shared::postgres'.
-        resource_type: resource::Type,
+        resource_type: ResourceType,
         #[command(flatten)]
         confirmation: ConfirmationArgs,
     },
@@ -243,7 +245,7 @@ pub struct ProjectStartArgs {
     #[arg(long, default_value_t = DEFAULT_IDLE_MINUTES)]
     /// How long to wait before putting the project in an idle state due to inactivity.
     /// 0 means the project will never idle
-    pub idle_minutes: u64,
+    pub idle_minutes: u32,
 }
 
 #[derive(Parser, Clone, Debug, Default)]
@@ -340,8 +342,6 @@ pub enum InitTemplateArg {
     None,
 }
 
-pub const EXAMPLES_REPO: &str = "https://github.com/shuttle-hq/shuttle-examples";
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct TemplateLocation {
     pub auto_path: String,
@@ -383,7 +383,7 @@ impl InitTemplateArg {
         };
 
         TemplateLocation {
-            auto_path: EXAMPLES_REPO.into(),
+            auto_path: SHUTTLE_EXAMPLES_REPO.into(),
             subfolder: Some(path.to_string()),
         }
     }
@@ -430,7 +430,7 @@ mod tests {
         assert_eq!(
             init_args.git_template().unwrap(),
             Some(TemplateLocation {
-                auto_path: EXAMPLES_REPO.into(),
+                auto_path: SHUTTLE_EXAMPLES_REPO.into(),
                 subfolder: Some("tower/hello-world".into())
             })
         );
@@ -445,7 +445,7 @@ mod tests {
         assert_eq!(
             init_args.git_template().unwrap(),
             Some(TemplateLocation {
-                auto_path: EXAMPLES_REPO.into(),
+                auto_path: SHUTTLE_EXAMPLES_REPO.into(),
                 subfolder: Some("axum/hello-world".into())
             })
         );
@@ -460,7 +460,7 @@ mod tests {
         assert_eq!(
             init_args.git_template().unwrap(),
             Some(TemplateLocation {
-                auto_path: EXAMPLES_REPO.into(),
+                auto_path: SHUTTLE_EXAMPLES_REPO.into(),
                 subfolder: Some("custom-service/none".into())
             })
         );

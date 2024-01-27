@@ -1,4 +1,4 @@
-use shuttle_common::models::service;
+use shuttle_common::models::service::ServiceResponse;
 use sqlx::{sqlite::SqliteRow, FromRow, Row};
 use ulid::Ulid;
 
@@ -8,7 +8,7 @@ pub struct Service {
     pub name: String,
 }
 
-impl From<Service> for service::Response {
+impl From<Service> for ServiceResponse {
     fn from(service: Service) -> Self {
         Self {
             id: service.id.to_string(),

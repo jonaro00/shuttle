@@ -170,7 +170,7 @@ pub struct ProjectDetails {
     pub account_name: AccountName,
 }
 
-impl From<ProjectDetails> for shuttle_common::models::admin::ProjectResponse {
+impl From<ProjectDetails> for shuttle_common::models::admin::ProjectAccountPair {
     fn from(project: ProjectDetails) -> Self {
         Self {
             project_name: project.project_name.to_string(),
@@ -294,7 +294,8 @@ pub mod tests {
     use shuttle_common::backends::auth::ConvertResponse;
     use shuttle_common::claims::{AccountTier, Claim};
     use shuttle_common::models::deployment::DeploymentRequest;
-    use shuttle_common::models::{project, service};
+    use shuttle_common::models::project::{ProjectInfo, ProjectState};
+    use shuttle_common::models::service::ServiceSummary;
     use shuttle_common_tests::resource_recorder::start_mocked_resource_recorder;
     use sqlx::sqlite::SqliteConnectOptions;
     use sqlx::{query, SqlitePool};
@@ -861,7 +862,7 @@ pub mod tests {
                 sender: self.sender.clone(),
             };
 
-            this.wait_for_state(project::State::Ready).await;
+            this.wait_for_state(ProjectState::Ready).await;
 
             this
         }
@@ -916,7 +917,7 @@ pub mod tests {
 
     impl TestProject {
         /// Wait a few seconds for the project to enter the desired state
-        pub async fn wait_for_state(&mut self, state: project::State) {
+        pub async fn wait_for_state(&mut self, state: ProjectState) {
             let mut tries = 0;
             let project_name = &self.project_name;
 
@@ -934,7 +935,7 @@ pub mod tests {
 
                 assert_eq!(resp.status(), StatusCode::OK);
                 let body = hyper::body::to_bytes(resp.into_body()).await.unwrap();
-                let project: project::Response = serde_json::from_slice(&body).unwrap();
+                let project: ProjectInfo = serde_json::from_slice(&body).unwrap();
 
                 if project.state == state {
                     break;
@@ -991,7 +992,7 @@ pub mod tests {
                 .await
                 .unwrap();
 
-            self.wait_for_state(project::State::Destroyed).await;
+            self.wait_for_state(ProjectState::Destroyed).await;
         }
 
         /// Send a request to the router for this project
@@ -1085,7 +1086,7 @@ pub mod tests {
 
                 assert_eq!(resp.status(), StatusCode::OK);
                 let body = hyper::body::to_bytes(resp.into_body()).await.unwrap();
-                let service: service::Summary = serde_json::from_slice(&body).unwrap();
+                let service: ServiceSummary = serde_json::from_slice(&body).unwrap();
 
                 if service.deployment.is_some() {
                     break;
@@ -1244,7 +1245,7 @@ pub mod tests {
             .unwrap();
 
         timed_loop!(wait: 1, max: 12, {
-            let project: project::Response = api_client
+            let project: ProjectInfo = api_client
                 .request(
                     Request::get("/projects/matrix")
                         .with_header(&authorization)
@@ -1258,7 +1259,7 @@ pub mod tests {
                 .await
                 .unwrap();
 
-            if project.state == project::State::Ready {
+            if project.state == ProjectState::Ready {
                 break;
             }
 
@@ -1299,8 +1300,8 @@ pub mod tests {
                 )
                 .await
                 .unwrap();
-            let resp = serde_json::from_slice::<project::Response>(resp.body().as_slice()).unwrap();
-            if matches!(resp.state, project::State::Destroyed) {
+            let resp = serde_json::from_slice::<ProjectInfo>(resp.body().as_slice()).unwrap();
+            if matches!(resp.state, ProjectState::Destroyed) {
                 break;
             }
         });
@@ -1315,9 +1316,8 @@ pub mod tests {
             )
             .map_ok(|resp| {
                 assert_eq!(resp.status(), StatusCode::OK);
-                let resp =
-                    serde_json::from_slice::<project::Response>(resp.body().as_slice()).unwrap();
-                assert_eq!(resp.state, project::State::Destroyed);
+                let resp = serde_json::from_slice::<ProjectInfo>(resp.body().as_slice()).unwrap();
+                assert_eq!(resp.state, ProjectState::Destroyed);
             })
             .await
             .unwrap();

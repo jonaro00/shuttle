@@ -1,7 +1,7 @@
 use headers::Authorization;
 use http::{Method, Uri};
 
-use crate::models;
+use crate::models::project::ProjectInfo;
 
 use super::{Error, ServicesApiClient};
 
@@ -35,10 +35,7 @@ impl GatewayClient {
 /// Interact with all the data relating to projects
 trait ProjectsDal {
     /// Get the projects that belong to a user
-    async fn get_user_projects(
-        &self,
-        user_token: &str,
-    ) -> Result<Vec<models::project::Response>, Error>;
+    async fn get_user_projects(&self, user_token: &str) -> Result<Vec<ProjectInfo>, Error>;
 
     /// Get the IDs of all the projects belonging to a user
     async fn get_user_project_ids(&self, user_token: &str) -> Result<Vec<String>, Error> {
@@ -54,10 +51,7 @@ trait ProjectsDal {
 }
 
 impl ProjectsDal for GatewayClient {
-    async fn get_user_projects(
-        &self,
-        user_token: &str,
-    ) -> Result<Vec<models::project::Response>, Error> {
+    async fn get_user_projects(&self, user_token: &str) -> Result<Vec<ProjectInfo>, Error> {
         let projects = self
             .public_client
             .request(
@@ -77,7 +71,7 @@ mod tests {
     use async_trait::async_trait;
     use test_context::{test_context, AsyncTestContext};
 
-    use crate::models::project::{Response, State};
+    use crate::models::project::{ProjectInfo, ProjectState};
     use crate::test_utils::mocked_gateway_server;
 
     use super::{GatewayClient, ProjectsDal};
@@ -101,16 +95,16 @@ mod tests {
         assert_eq!(
             res,
             vec![
-                Response {
+                ProjectInfo {
                     id: "id1".to_string(),
                     name: "user-1-project-1".to_string(),
-                    state: State::Stopped,
+                    state: ProjectState::Stopped,
                     idle_minutes: Some(30)
                 },
-                Response {
+                ProjectInfo {
                     id: "id2".to_string(),
                     name: "user-1-project-2".to_string(),
-                    state: State::Ready,
+                    state: ProjectState::Ready,
                     idle_minutes: Some(30)
                 }
             ]

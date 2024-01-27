@@ -15,40 +15,35 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::str::FromStr;
 
-use args::{ConfirmationArgs, GenerateCommand};
-use clap_mangen::Man;
-
 use shuttle_common::{
     claims::{ClaimService, InjectPropagation},
     constants::{
-        API_URL_DEFAULT, DEFAULT_IDLE_MINUTES, EXECUTABLE_DIRNAME, SHUTTLE_CLI_DOCS_URL,
-        SHUTTLE_GH_ISSUE_URL, SHUTTLE_IDLE_DOCS_URL, SHUTTLE_INSTALL_DOCS_URL, SHUTTLE_LOGIN_URL,
-        STORAGE_DIRNAME,
+        API_URL_DEFAULT, CREATE_SERVICE_BODY_LIMIT, DEFAULT_IDLE_MINUTES,
+        DEPLOYER_END_MESSAGES_BAD, DEPLOYER_END_MESSAGES_GOOD, EXECUTABLE_DIRNAME,
+        GIT_STRINGS_MAX_LENGTH, SHUTTLE_CLI_DOCS_URL, SHUTTLE_EXAMPLES_REPO, SHUTTLE_IDLE_DOCS_URL,
+        SHUTTLE_INSTALL_DOCS_URL, SHUTTLE_LOGIN_URL, SHUTTLE_NEW_ISSUE_URL, STORAGE_DIRNAME,
     },
-    deployment::{DEPLOYER_END_MESSAGES_BAD, DEPLOYER_END_MESSAGES_GOOD},
     models::{
-        deployment::{
-            get_deployments_table, DeploymentRequest, CREATE_SERVICE_BODY_LIMIT,
-            GIT_STRINGS_MAX_LENGTH,
-        },
+        deployment::{get_deployments_table, DeploymentRequest, DeploymentState},
         error::ApiError,
-        project,
+        project::{self, ProjectConfig, ProjectState},
         resource::get_resource_tables,
     },
-    resource, semvers_are_compatible, ApiKey, LogItem, VersionInfo,
+    resource::{ResourceInfo, ResourceType},
+    semvers_are_compatible, ApiKey, LogItem, VersionInfo,
 };
 use shuttle_proto::runtime::{
     runtime_client::RuntimeClient, LoadRequest, StartRequest, StopRequest,
 };
-use shuttle_service::runner;
 use shuttle_service::{
     builder::{build_workspace, BuiltService},
-    Environment,
+    runner, Environment,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{parser::ValueSource, CommandFactory, FromArgMatches};
 use clap_complete::{generate, Shell};
+use clap_mangen::Man;
 use config::RequestContext;
 use crossterm::style::Stylize;
 use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Input, Password};
@@ -74,8 +69,8 @@ use uuid::Uuid;
 
 pub use crate::args::{Command, ProjectArgs, RunArgs, ShuttleArgs};
 use crate::args::{
-    DeployArgs, DeploymentCommand, InitArgs, LoginArgs, LogoutArgs, ProjectCommand,
-    ProjectStartArgs, ResourceCommand, EXAMPLES_REPO,
+    ConfirmationArgs, DeployArgs, DeploymentCommand, GenerateCommand, InitArgs, LoginArgs,
+    LogoutArgs, ProjectCommand, ProjectStartArgs, ResourceCommand,
 };
 use crate::client::Client;
 use crate::provisioner_server::LocalProvisioner;
@@ -467,7 +462,7 @@ impl Shuttle {
         printdoc!(
             "
             Hint: Check the examples repo for a full list of templates:
-                  {EXAMPLES_REPO}
+                  {SHUTTLE_EXAMPLES_REPO}
             Hint: You can also use `cargo shuttle init --from` to clone templates.
                   See {SHUTTLE_CLI_DOCS_URL}
                   or run `cargo shuttle init --help`
@@ -577,8 +572,8 @@ impl Shuttle {
 
     /// Provide feedback on GitHub.
     fn feedback(&self) -> Result<CommandOutcome> {
-        let _ = webbrowser::open(SHUTTLE_GH_ISSUE_URL);
-        println!("If your browser did not open automatically, go to {SHUTTLE_GH_ISSUE_URL}");
+        let _ = webbrowser::open(SHUTTLE_NEW_ISSUE_URL);
+        println!("If your browser did not open automatically, go to {SHUTTLE_NEW_ISSUE_URL}");
 
         Ok(CommandOutcome::Ok)
     }
@@ -657,7 +652,7 @@ impl Shuttle {
 
             pb.set_message(format!("Stopping {}", deployment.id));
 
-            if deployment.state == shuttle_common::deployment::State::Stopped {
+            if deployment.state == shuttle_common::models::deployment::DeploymentState::Stopped {
                 Ok(Some(cleanup))
             } else {
                 Ok(None)
@@ -886,7 +881,7 @@ impl Shuttle {
 
     async fn resource_delete(
         &self,
-        resource_type: &resource::Type,
+        resource_type: &ResourceType,
         no_confirm: bool,
     ) -> Result<CommandOutcome> {
         let client = self.client.as_ref().unwrap();
@@ -1114,7 +1109,7 @@ impl Shuttle {
         let resources = response
             .resources
             .into_iter()
-            .map(resource::Response::from_bytes)
+            .map(ResourceInfo::from_bytes)
             .collect();
 
         println!(
@@ -1706,21 +1701,21 @@ impl Shuttle {
             })?;
 
         // A deployment will only exist if there is currently one in the running state
-        if deployment.state != shuttle_common::deployment::State::Running {
+        if deployment.state != DeploymentState::Running {
             println!("{}", "Deployment has not entered the running state".red());
             println!();
 
             match deployment.state {
-                shuttle_common::deployment::State::Stopped => {
+                DeploymentState::Stopped => {
                     println!("State: Stopped - Deployment was running, but has been stopped by the user.")
                 }
-                shuttle_common::deployment::State::Completed => {
+                DeploymentState::Completed => {
                     println!("State: Completed - Deployment was running, but stopped running all by itself.")
                 }
-                shuttle_common::deployment::State::Unknown => {
+                DeploymentState::Unknown => {
                     println!("State: Unknown - Deployment was in an unknown state. We never expect this state and entering this state should be considered a bug.")
                 }
-                shuttle_common::deployment::State::Crashed => {
+                DeploymentState::Crashed => {
                     println!(
                         "{}",
                         "State: Crashed - Deployment crashed after startup.".red()
@@ -1753,9 +1748,9 @@ impl Shuttle {
         Ok(CommandOutcome::Ok)
     }
 
-    async fn project_start(&self, idle_minutes: u64) -> Result<CommandOutcome> {
+    async fn project_start(&self, idle_minutes: u32) -> Result<CommandOutcome> {
         let client = self.client.as_ref().unwrap();
-        let config = &project::Config { idle_minutes };
+        let config = &ProjectConfig { idle_minutes };
 
         let p = self.ctx.project_name();
         wait_with_spinner(|i, pb| async move {
@@ -1767,8 +1762,8 @@ impl Shuttle {
             pb.set_message(format!("{project}"));
 
             let done = [
-                project::State::Ready,
-                project::State::Errored {
+                ProjectState::Ready,
+                ProjectState::Errored {
                     message: Default::default(),
                 },
             ]
@@ -1807,7 +1802,7 @@ impl Shuttle {
         Ok(CommandOutcome::Ok)
     }
 
-    async fn project_restart(&self, idle_minutes: u64) -> Result<CommandOutcome> {
+    async fn project_restart(&self, idle_minutes: u32) -> Result<CommandOutcome> {
         self.project_stop()
             .await
             .map_err(suggestions::project::project_restart_failure)?;
@@ -1856,9 +1851,9 @@ impl Shuttle {
                 pb.set_message(format!("{project}"));
 
                 let done = [
-                    project::State::Ready,
-                    project::State::Destroyed,
-                    project::State::Errored {
+                    ProjectState::Ready,
+                    ProjectState::Destroyed,
+                    ProjectState::Errored {
                         message: Default::default(),
                     },
                 ]
@@ -1910,8 +1905,8 @@ impl Shuttle {
             pb.set_message(format!("{project}"));
 
             let done = [
-                project::State::Destroyed,
-                project::State::Errored {
+                ProjectState::Destroyed,
+                ProjectState::Errored {
                     message: Default::default(),
                 },
             ]

@@ -246,6 +246,7 @@ impl Service<Request<Body>> for Bouncer {
     }
 }
 
+#[derive(Default)]
 pub struct UserServiceBuilder {
     service: Option<Arc<GatewayService>>,
     task_sender: Option<Sender<BoxedTask>>,
@@ -258,15 +259,7 @@ pub struct UserServiceBuilder {
 
 impl UserServiceBuilder {
     pub fn new() -> Self {
-        Self {
-            service: None,
-            task_sender: None,
-            public: None,
-            acme: None,
-            tls_acceptor: None,
-            bouncer_binds_to: None,
-            user_binds_to: None,
-        }
+        Self::default()
     }
 
     pub fn with_public(mut self, public: FQDN) -> Self {

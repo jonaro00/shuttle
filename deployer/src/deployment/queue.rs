@@ -9,8 +9,7 @@ use flate2::read::GzDecoder;
 use opentelemetry::global;
 use shuttle_common::{
     claims::Claim,
-    constants::{EXECUTABLE_DIRNAME, STORAGE_DIRNAME},
-    deployment::DEPLOYER_END_MSG_BUILD_ERR,
+    constants::{DEPLOYER_END_MSG_BUILD_ERR, EXECUTABLE_DIRNAME, STORAGE_DIRNAME},
     log::LogRecorder,
     LogItem,
 };

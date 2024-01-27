@@ -3,22 +3,24 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::str::FromStr;
 
-use crate::models::deployment;
+use super::deployment::DeploymentInfo;
 
 #[derive(Deserialize, Serialize)]
-pub struct Response {
+#[typeshare::typeshare]
+pub struct ServiceResponse {
     pub id: String,
     pub name: String,
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct Summary {
+#[typeshare::typeshare]
+pub struct ServiceSummary {
     pub name: String,
-    pub deployment: Option<deployment::Response>,
+    pub deployment: Option<DeploymentInfo>,
     pub uri: String,
 }
 
-impl Display for Summary {
+impl Display for ServiceSummary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let deployment = if let Some(ref deployment) = self.deployment {
             format!(

@@ -5,7 +5,7 @@ use strum::{Display, EnumString};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum Type {
+pub enum DatabaseType {
     AwsRds(AwsRdsEngine),
     Shared(SharedEngine),
 }
@@ -27,16 +27,16 @@ pub enum SharedEngine {
     MongoDb,
 }
 
-impl Display for Type {
+impl Display for DatabaseType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::AwsRds(rds_type) => write!(f, "aws_rds::{rds_type}"),
-            Type::Shared(shared_type) => write!(f, "shared::{shared_type}"),
+            DatabaseType::AwsRds(rds_type) => write!(f, "aws_rds::{rds_type}"),
+            DatabaseType::Shared(shared_type) => write!(f, "shared::{shared_type}"),
         }
     }
 }
 
-impl FromStr for Type {
+impl FromStr for DatabaseType {
     type Err = String;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {

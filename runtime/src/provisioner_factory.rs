@@ -45,7 +45,7 @@ impl ProvisionerFactory {
 impl Factory for ProvisionerFactory {
     async fn get_db_connection(
         &mut self,
-        db_type: database::Type,
+        db_type: database::DatabaseType,
     ) -> Result<DatabaseInfo, shuttle_service::Error> {
         let mut request = Request::new(DatabaseRequest {
             project_name: self.service_name.to_string(),

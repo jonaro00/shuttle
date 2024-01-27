@@ -16,6 +16,8 @@ use crate::tracing::JsonVisitor;
 /// Used to determine settings based on which backend crate does what
 #[derive(Clone, Debug, Default, EnumString, Eq, PartialEq, Deserialize, Serialize)]
 #[cfg_attr(feature = "display", derive(strum::Display))]
+#[serde(tag = "type", content = "content")]
+#[typeshare::typeshare]
 pub enum Backend {
     /// Is considered an error
     #[default]
@@ -32,6 +34,7 @@ pub enum Backend {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[typeshare::typeshare]
 pub struct LogItem {
     /// Deployment id
     pub id: Uuid,

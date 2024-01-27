@@ -22,14 +22,12 @@ use shuttle_common::backends::cache::CacheManager;
 use shuttle_common::backends::metrics::{Metrics, TraceLayer};
 use shuttle_common::claims::{Scope, EXP_MINUTES};
 use shuttle_common::limits::ClaimExt;
+use shuttle_common::models::deployment::DeploymentState;
 use shuttle_common::models::error::axum::CustomErrorPath;
 use shuttle_common::models::error::ErrorKind;
-use shuttle_common::models::{
-    admin::ProjectResponse,
-    project::{self, ProjectName},
-    stats,
-};
-use shuttle_common::{deployment, request_span, VersionInfo};
+use shuttle_common::models::project::{ProjectConfig, ProjectInfo, ProjectState};
+use shuttle_common::models::{admin::ProjectAccountPair, project::ProjectName, stats};
+use shuttle_common::{request_span, VersionInfo};
 use shuttle_proto::provisioner::provisioner_client::ProvisionerClient;
 use shuttle_proto::provisioner::Ping;
 use tokio::sync::mpsc::Sender;
@@ -68,6 +66,7 @@ pub(crate) struct RouterState {
     pub posthog_client: Arc<async_posthog::Client>,
 }
 
+#[derive(Default)]
 pub struct ApiBuilder {
     router: Router<RouterState>,
     service: Option<Arc<GatewayService>>,
@@ -78,13 +77,7 @@ pub struct ApiBuilder {
 
 impl ApiBuilder {
     pub fn new() -> Self {
-        Self {
-            router: Router::new(),
-            service: None,
-            sender: None,
-            posthog_client: None,
-            bind: None,
-        }
+        Self::default()
     }
 
     pub fn with_acme(mut self, acme: AcmeClient, resolver: Arc<GatewayCertResolver>) -> Self {
@@ -189,7 +182,7 @@ impl ApiBuilder {
             .route(
                 "/versions",
                 get(|| async {
-                    axum::Json(VersionInfo {
+                    AxumJson(VersionInfo {
                         gateway: env!("CARGO_PKG_VERSION").parse().unwrap(),
                         // For now, these use the same version as gateway (we release versions in lockstep).
                         // Only one version is officially compatible, but more are in reality.
@@ -301,11 +294,11 @@ impl StatusResponse {
 async fn get_project(
     State(RouterState { service, .. }): State<RouterState>,
     ScopedUser { scope, .. }: ScopedUser,
-) -> Result<AxumJson<project::Response>, Error> {
+) -> Result<AxumJson<ProjectInfo>, Error> {
     let project = service.find_project(&scope).await?;
     let idle_minutes = project.state.idle_minutes();
 
-    let response = project::Response {
+    let response = ProjectInfo {
         id: project.project_id.to_uppercase(),
         name: scope.to_string(),
         state: project.state.into(),
@@ -330,14 +323,14 @@ async fn get_projects_list(
     State(RouterState { service, .. }): State<RouterState>,
     User { name, .. }: User,
     Query(PaginationDetails { page, limit }): Query<PaginationDetails>,
-) -> Result<AxumJson<Vec<project::Response>>, Error> {
+) -> Result<AxumJson<Vec<ProjectInfo>>, Error> {
     let limit = limit.unwrap_or(u32::MAX);
     let page = page.unwrap_or(0);
     let projects = service
         // The `offset` is page size * amount of pages
         .iter_user_projects_detailed(&name, limit * page, limit)
         .await?
-        .map(|project| project::Response {
+        .map(|project| ProjectInfo {
             id: project.0.to_uppercase(),
             name: project.1.to_string(),
             idle_minutes: project.2.idle_minutes(),
@@ -355,8 +348,8 @@ async fn create_project(
     }): State<RouterState>,
     User { name, claim, .. }: User,
     CustomErrorPath(project_name): CustomErrorPath<ProjectName>,
-    AxumJson(config): AxumJson<project::Config>,
-) -> Result<AxumJson<project::Response>, Error> {
+    AxumJson(config): AxumJson<ProjectConfig>,
+) -> Result<AxumJson<ProjectInfo>, Error> {
     let is_cch_project = project_name.is_cch_project();
 
     // Check that the user is within their project limits.
@@ -394,7 +387,7 @@ async fn create_project(
         .send(&sender)
         .await?;
 
-    let response = project::Response {
+    let response = ProjectInfo {
         id: project.project_id.to_string().to_uppercase(),
         name: project_name.to_string(),
         state: project.state.into(),
@@ -413,18 +406,18 @@ async fn destroy_project(
         scope: project_name,
         ..
     }: ScopedUser,
-) -> Result<AxumJson<project::Response>, Error> {
+) -> Result<AxumJson<ProjectInfo>, Error> {
     let project = service.find_project(&project_name).await?;
     let idle_minutes = project.state.idle_minutes();
 
-    let mut response = project::Response {
+    let mut response = ProjectInfo {
         id: project.project_id.to_uppercase(),
         name: project_name.to_string(),
         state: project.state.into(),
         idle_minutes,
     };
 
-    if response.state == shuttle_common::models::project::State::Destroyed {
+    if response.state == ProjectState::Destroyed {
         return Ok(AxumJson(response));
     }
 
@@ -436,7 +429,7 @@ async fn destroy_project(
         .send(&sender)
         .await?;
 
-    response.state = shuttle_common::models::project::State::Destroying;
+    response.state = ProjectState::Destroying;
 
     Ok(AxumJson(response))
 }
@@ -501,10 +494,10 @@ async fn delete_project(
     let has_bad_state = deployments.iter().any(|d| {
         !matches!(
             d.state,
-            deployment::State::Running
-                | deployment::State::Completed
-                | deployment::State::Crashed
-                | deployment::State::Stopped
+            DeploymentState::Running
+                | DeploymentState::Completed
+                | DeploymentState::Crashed
+                | DeploymentState::Stopped
         )
     });
 
@@ -514,7 +507,7 @@ async fn delete_project(
 
     let running_deployments = deployments
         .into_iter()
-        .filter(|d| d.state == deployment::State::Running);
+        .filter(|d| d.state == DeploymentState::Running);
 
     for running_deployment in running_deployments {
         let res = project_caller
@@ -965,7 +958,7 @@ async fn renew_gateway_acme_certificate(
 
 async fn get_projects(
     State(RouterState { service, .. }): State<RouterState>,
-) -> Result<AxumJson<Vec<ProjectResponse>>, Error> {
+) -> Result<AxumJson<Vec<ProjectAccountPair>>, Error> {
     let projects = service
         .iter_projects_detailed()
         .await?
@@ -1296,9 +1289,7 @@ pub mod tests {
         cch_idle_project.run_health_check().await;
         cch_idle_project.run_health_check().await;
 
-        cch_idle_project
-            .wait_for_state(project::State::Stopped)
-            .await;
+        cch_idle_project.wait_for_state(ProjectState::Stopped).await;
         // RUNNING PROJECTS = 0 []
         let mut normal_idle_project = gateway.create_project("project").await;
         // RUNNING PROJECTS = 1 [normal_idle_project]
@@ -1307,7 +1298,7 @@ pub mod tests {
         normal_idle_project.run_health_check().await;
 
         normal_idle_project
-            .wait_for_state(project::State::Stopped)
+            .wait_for_state(ProjectState::Stopped)
             .await;
         // RUNNING PROJECTS = 0 []
         let mut normal_idle_project2 = gateway.create_project("project-2").await;
@@ -1317,7 +1308,7 @@ pub mod tests {
         normal_idle_project2.run_health_check().await;
 
         normal_idle_project2
-            .wait_for_state(project::State::Stopped)
+            .wait_for_state(ProjectState::Stopped)
             .await;
         // RUNNING PROJECTS = 0 []
         let pro_user = gateway.new_authorization_bearer("trinity", AccountTier::Pro);
@@ -1358,7 +1349,7 @@ pub mod tests {
         long_running.run_health_check().await;
         long_running.run_health_check().await;
 
-        long_running.wait_for_state(project::State::Stopped).await;
+        long_running.wait_for_state(ProjectState::Stopped).await;
         // RUNNING PROJECTS = 1 [normal_idle_project]
 
         let normal_code2 = normal_idle_project2
@@ -1387,7 +1378,7 @@ pub mod tests {
         long_running.run_health_check().await;
         long_running.run_health_check().await;
 
-        long_running.wait_for_state(project::State::Stopped).await;
+        long_running.wait_for_state(ProjectState::Stopped).await;
         // RUNNING PROJECTS = 2 [normal_idle_project, normal_idle_project2]
         let _extra = gateway.user_create_project("reloaded", &pro_user).await;
         // RUNNING PROJECTS = 3 [normal_idle_project, normal_idle_project2, _extra]
@@ -1420,7 +1411,7 @@ pub mod tests {
         project.run_health_check().await;
         project.run_health_check().await;
 
-        project.wait_for_state(project::State::Stopped).await;
+        project.wait_for_state(ProjectState::Stopped).await;
 
         assert_eq!(
             project.router_call(Method::DELETE, "/delete").await,

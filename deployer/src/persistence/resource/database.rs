@@ -23,7 +23,7 @@ pub enum SharedType {
     MongoDb,
 }
 
-impl From<Type> for shuttle_common::database::Type {
+impl From<Type> for shuttle_common::database::DatabaseType {
     fn from(r#type: Type) -> Self {
         match r#type {
             Type::AwsRds(rds_type) => Self::AwsRds(rds_type.into()),
@@ -51,11 +51,15 @@ impl From<SharedType> for shuttle_common::database::SharedEngine {
     }
 }
 
-impl From<shuttle_common::database::Type> for Type {
-    fn from(r#type: shuttle_common::database::Type) -> Self {
+impl From<shuttle_common::database::DatabaseType> for Type {
+    fn from(r#type: shuttle_common::database::DatabaseType) -> Self {
         match r#type {
-            shuttle_common::database::Type::AwsRds(rds_type) => Self::AwsRds(rds_type.into()),
-            shuttle_common::database::Type::Shared(shared_type) => Self::Shared(shared_type.into()),
+            shuttle_common::database::DatabaseType::AwsRds(rds_type) => {
+                Self::AwsRds(rds_type.into())
+            }
+            shuttle_common::database::DatabaseType::Shared(shared_type) => {
+                Self::Shared(shared_type.into())
+            }
         }
     }
 }

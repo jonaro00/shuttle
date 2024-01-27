@@ -25,8 +25,8 @@ macro_rules! aws_engine {
             #[cfg(feature = $feature)]
             #[async_trait::async_trait]
             impl shuttle_service::ResourceBuilder for $struct_ident {
-                const TYPE: shuttle_service::resource::Type = shuttle_service::resource::Type::Database(
-                    shuttle_service::database::Type::AwsRds(
+                const TYPE: shuttle_service::ResourceType = shuttle_service::ResourceType::Database(
+                    shuttle_service::DatabaseType::AwsRds(
                         shuttle_service::database::AwsRdsEngine::$struct_ident
                     )
                 );

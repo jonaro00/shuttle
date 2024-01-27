@@ -17,7 +17,7 @@ use shuttle_common::{
         tracing::ExtractPropagationLayer,
     },
     claims::{Claim, ClaimLayer, InjectPropagationLayer},
-    resource,
+    resource::ResourceInfo,
     secrets::Secret,
 };
 use shuttle_proto::{
@@ -222,7 +222,7 @@ where
 
         let past_resources = resources
             .into_iter()
-            .map(resource::Response::from_bytes)
+            .map(ResourceInfo::from_bytes)
             .collect();
         let new_resources = Arc::new(Mutex::new(Vec::new()));
         let resource_tracker = ResourceTracker::new(past_resources, new_resources.clone());
@@ -249,7 +249,7 @@ where
                             .lock()
                             .expect("to get lock on new resources")
                             .iter()
-                            .map(resource::Response::to_bytes)
+                            .map(ResourceInfo::to_bytes)
                             .collect(),
                     };
                     return Ok(Response::new(message));
@@ -260,7 +260,7 @@ where
                     .lock()
                     .expect("to get lock on new resources")
                     .iter()
-                    .map(resource::Response::to_bytes)
+                    .map(ResourceInfo::to_bytes)
                     .collect();
 
                 if error.is_panic() {
@@ -302,7 +302,7 @@ where
                 .lock()
                 .expect("to get lock on new resources")
                 .iter()
-                .map(resource::Response::to_bytes)
+                .map(ResourceInfo::to_bytes)
                 .collect(),
         };
         Ok(Response::new(message))

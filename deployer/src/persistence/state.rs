@@ -1,8 +1,9 @@
+use shuttle_common::models::deployment::DeploymentState;
 use strum::{Display, EnumString};
 use uuid::Uuid;
 
 /// States a deployment can be in
-#[derive(sqlx::Type, Debug, Display, Clone, Copy, EnumString, PartialEq, Eq)]
+#[derive(sqlx::Type, Debug, Default, Display, Clone, Copy, EnumString, PartialEq, Eq)]
 #[strum(ascii_case_insensitive)]
 pub enum State {
     /// Deployment is queued to be build
@@ -30,22 +31,17 @@ pub enum State {
     Crashed,
 
     /// We never expect this state and entering this state should be considered a bug
+    #[default]
     Unknown,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct DeploymentState {
+pub struct DeploymentStateUpdate {
     pub id: Uuid,
     pub state: State,
 }
 
-impl Default for State {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-impl From<State> for shuttle_common::deployment::State {
+impl From<State> for DeploymentState {
     fn from(state: State) -> Self {
         match state {
             State::Queued => Self::Queued,
@@ -61,18 +57,18 @@ impl From<State> for shuttle_common::deployment::State {
     }
 }
 
-impl From<shuttle_common::deployment::State> for State {
-    fn from(state: shuttle_common::deployment::State) -> Self {
+impl From<DeploymentState> for State {
+    fn from(state: DeploymentState) -> Self {
         match state {
-            shuttle_common::deployment::State::Queued => Self::Queued,
-            shuttle_common::deployment::State::Building => Self::Building,
-            shuttle_common::deployment::State::Built => Self::Built,
-            shuttle_common::deployment::State::Loading => Self::Loading,
-            shuttle_common::deployment::State::Running => Self::Running,
-            shuttle_common::deployment::State::Completed => Self::Completed,
-            shuttle_common::deployment::State::Stopped => Self::Stopped,
-            shuttle_common::deployment::State::Crashed => Self::Crashed,
-            shuttle_common::deployment::State::Unknown => Self::Unknown,
+            DeploymentState::Queued => Self::Queued,
+            DeploymentState::Building => Self::Building,
+            DeploymentState::Built => Self::Built,
+            DeploymentState::Loading => Self::Loading,
+            DeploymentState::Running => Self::Running,
+            DeploymentState::Completed => Self::Completed,
+            DeploymentState::Stopped => Self::Stopped,
+            DeploymentState::Crashed => Self::Crashed,
+            DeploymentState::Unknown => Self::Unknown,
         }
     }
 }
@@ -82,7 +78,7 @@ pub trait StateRecorder: Clone + Send + Sync + 'static {
     type Err: std::error::Error + Send;
 
     /// Takes a state and send it on to the async thread that records it.
-    fn record_state(&self, log: DeploymentState) -> Result<(), Self::Err>;
+    fn record_state(&self, log: DeploymentStateUpdate) -> Result<(), Self::Err>;
 }
 
 #[cfg(test)]

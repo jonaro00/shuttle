@@ -30,10 +30,10 @@ pub mod provisioner {
         }
     }
 
-    impl From<database::Type> for database_request::DbType {
-        fn from(db_type: database::Type) -> Self {
+    impl From<database::DatabaseType> for database_request::DbType {
+        fn from(db_type: database::DatabaseType) -> Self {
             match db_type {
-                database::Type::Shared(engine) => {
+                database::DatabaseType::Shared(engine) => {
                     let engine = match engine {
                         SharedEngine::Postgres => shared::Engine::Postgres(String::new()),
                         SharedEngine::MongoDb => shared::Engine::Mongodb(String::new()),
@@ -42,7 +42,7 @@ pub mod provisioner {
                         engine: Some(engine),
                     })
                 }
-                database::Type::AwsRds(engine) => {
+                database::DatabaseType::AwsRds(engine) => {
                     let config = RdsConfig {};
                     let engine = match engine {
                         AwsRdsEngine::Postgres => aws_rds::Engine::Postgres(config),
@@ -57,28 +57,30 @@ pub mod provisioner {
         }
     }
 
-    impl From<database_request::DbType> for Option<database::Type> {
+    impl From<database_request::DbType> for Option<database::DatabaseType> {
         fn from(db_type: database_request::DbType) -> Self {
             match db_type {
                 database_request::DbType::Shared(Shared {
                     engine: Some(engine),
                 }) => match engine {
                     shared::Engine::Postgres(_) => {
-                        Some(database::Type::Shared(SharedEngine::Postgres))
+                        Some(database::DatabaseType::Shared(SharedEngine::Postgres))
                     }
                     shared::Engine::Mongodb(_) => {
-                        Some(database::Type::Shared(SharedEngine::MongoDb))
+                        Some(database::DatabaseType::Shared(SharedEngine::MongoDb))
                     }
                 },
                 database_request::DbType::AwsRds(AwsRds {
                     engine: Some(engine),
                 }) => match engine {
                     aws_rds::Engine::Postgres(_) => {
-                        Some(database::Type::AwsRds(AwsRdsEngine::Postgres))
+                        Some(database::DatabaseType::AwsRds(AwsRdsEngine::Postgres))
                     }
-                    aws_rds::Engine::Mysql(_) => Some(database::Type::AwsRds(AwsRdsEngine::MySql)),
+                    aws_rds::Engine::Mysql(_) => {
+                        Some(database::DatabaseType::AwsRds(AwsRdsEngine::MySql))
+                    }
                     aws_rds::Engine::Mariadb(_) => {
-                        Some(database::Type::AwsRds(AwsRdsEngine::MariaDB))
+                        Some(database::DatabaseType::AwsRds(AwsRdsEngine::MariaDB))
                     }
                 },
                 database_request::DbType::Shared(Shared { engine: None })
@@ -106,18 +108,19 @@ pub mod runtime {
 #[cfg(feature = "resource-recorder")]
 pub mod resource_recorder {
     use anyhow::Context;
+    use shuttle_common::resource::{ResourceInfo, ResourceType};
     use std::str::FromStr;
 
     pub use super::generated::resource_recorder::*;
 
-    impl TryFrom<record_request::Resource> for shuttle_common::resource::Response {
+    impl TryFrom<record_request::Resource> for ResourceInfo {
         type Error = anyhow::Error;
 
         fn try_from(resource: record_request::Resource) -> Result<Self, Self::Error> {
-            let r#type = shuttle_common::resource::Type::from_str(resource.r#type.as_str())
+            let r#type = ResourceType::from_str(resource.r#type.as_str())
                 .map_err(anyhow::Error::msg)
                 .context("resource type should have a valid resource string")?;
-            let response = shuttle_common::resource::Response {
+            let response = ResourceInfo {
                 r#type,
                 config: serde_json::from_slice(&resource.config)
                     .context(format!("{} resource config should be valid JSON", r#type))?,
@@ -129,15 +132,15 @@ pub mod resource_recorder {
         }
     }
 
-    impl TryFrom<Resource> for shuttle_common::resource::Response {
+    impl TryFrom<Resource> for ResourceInfo {
         type Error = anyhow::Error;
 
         fn try_from(resource: Resource) -> Result<Self, Self::Error> {
-            let r#type = shuttle_common::resource::Type::from_str(resource.r#type.as_str())
+            let r#type = ResourceType::from_str(resource.r#type.as_str())
                 .map_err(anyhow::Error::msg)
                 .context("resource type should have a valid resource string")?;
 
-            let response = shuttle_common::resource::Response {
+            let response = ResourceInfo {
                 r#type,
                 config: serde_json::from_slice(&resource.config)
                     .context(format!("{} resource config should be valid JSON", r#type))?,

@@ -23,7 +23,7 @@ use opentelemetry::global;
 use opentelemetry_http::HeaderInjector;
 use shuttle_common::backends::headers::{XShuttleAccountName, XShuttleAdminSecret};
 use shuttle_common::claims::AccountTier;
-use shuttle_common::models::project::{ProjectName, State};
+use shuttle_common::models::project::{ProjectName, ProjectState};
 use sqlx::error::DatabaseError;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::SqlitePool;
@@ -550,7 +550,7 @@ impl GatewayService {
         account_name: AccountName,
         is_admin: bool,
         can_create_project: bool,
-        idle_minutes: u64,
+        idle_minutes: u32,
     ) -> Result<FindProjectPayload, Error> {
         if let Some(row) = query(
             r#"
@@ -608,34 +608,34 @@ impl GatewayService {
             } else {
                 // Otherwise it already exists. Because the caller of this command is the
                 // project owner, this means that the project is already in some running state.
-                let state = State::from(project);
+                let state = ProjectState::from(project);
                 let message = match state {
                     // Ongoing processes.
-                    State::Creating { .. }
-                    | State::Attaching { .. }
-                    | State::Recreating { .. }
-                    | State::Starting { .. }
-                    | State::Restarting { .. }
-                    | State::Stopping
-                    | State::Rebooting
-                    | State::Destroying => {
+                    ProjectState::Creating { .. }
+                    | ProjectState::Attaching { .. }
+                    | ProjectState::Recreating { .. }
+                    | ProjectState::Starting { .. }
+                    | ProjectState::Restarting { .. }
+                    | ProjectState::Stopping
+                    | ProjectState::Rebooting
+                    | ProjectState::Destroying => {
                         format!("project '{project_name}' is already {state}. You can check the status again using `cargo shuttle project status`.")
                     }
                     // Use different message than the default for `State::Ready`.
-                    State::Ready => {
+                    ProjectState::Ready => {
                         format!("project '{project_name}' is already running")
                     }
-                    State::Started | State::Destroyed => {
+                    ProjectState::Started | ProjectState::Destroyed => {
                         format!("project '{project_name}' is already {state}. Try using `cargo shuttle project restart` instead.")
                     }
-                    State::Stopped => {
+                    ProjectState::Stopped => {
                         format!("project '{project_name}' is idled. Find out more about idle projects here: \
 				 https://docs.shuttle.rs/getting-started/idle-projects")
                     }
-                    State::Errored { message } => {
+                    ProjectState::Errored { message } => {
                         format!("project '{project_name}' is in an errored state.\nproject message: {message}")
                     }
-                    State::Deleted => unreachable!(
+                    ProjectState::Deleted => unreachable!(
                         "deleted project should not never remain in gateway. please report this."
                     ),
                 };
@@ -670,7 +670,7 @@ impl GatewayService {
         project_name: ProjectName,
         project_id: Ulid,
         account_name: AccountName,
-        idle_minutes: u64,
+        idle_minutes: u32,
     ) -> Result<FindProjectPayload, Error> {
         let project = SqlxJson(Project::Creating(
             ProjectCreating::new_with_random_initial_key(

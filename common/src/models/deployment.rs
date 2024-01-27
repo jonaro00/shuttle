@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+use std::{fmt::Display, str::FromStr};
+
 use chrono::{DateTime, Utc};
 use comfy_table::{
     modifiers::UTF8_ROUND_CORNERS,
@@ -6,22 +9,17 @@ use comfy_table::{
 };
 use crossterm::style::Stylize;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, str::FromStr};
+use strum::{Display, EnumString};
 use uuid::Uuid;
 
-use crate::deployment::State;
-
-/// Max length of strings in the git metadata
-pub const GIT_STRINGS_MAX_LENGTH: usize = 80;
-/// Max HTTP body size for a deployment POST request
-pub const CREATE_SERVICE_BODY_LIMIT: usize = 50_000_000;
-const GIT_OPTION_NONE_TEXT: &str = "N/A";
+use crate::constants::GIT_OPTION_NONE_TEXT;
 
 #[derive(Deserialize, Serialize)]
-pub struct Response {
+#[typeshare::typeshare]
+pub struct DeploymentInfo {
     pub id: Uuid,
     pub service_id: String,
-    pub state: State,
+    pub state: DeploymentState,
     pub last_update: DateTime<Utc>,
     pub git_commit_id: Option<String>,
     pub git_commit_msg: Option<String>,
@@ -29,7 +27,58 @@ pub struct Response {
     pub git_dirty: Option<bool>,
 }
 
-impl Display for Response {
+#[derive(Default, Deserialize, Serialize)]
+#[typeshare::typeshare]
+pub struct DeploymentRequest {
+    pub data: Vec<u8>,
+    pub no_test: bool,
+    pub git_commit_id: Option<String>,
+    pub git_commit_msg: Option<String>,
+    pub git_branch: Option<String>,
+    pub git_dirty: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Display, Serialize, EnumString)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+#[strum(ascii_case_insensitive)]
+#[typeshare::typeshare]
+pub enum DeploymentState {
+    Queued,
+    Building,
+    Built,
+    Loading,
+    Running,
+    Completed,
+    Stopped,
+    Crashed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeploymentMetadata {
+    pub env: Environment,
+    pub project_name: String,
+    /// Typically your crate name
+    pub service_name: String,
+    /// Path to a folder that persists between deployments
+    pub storage_path: PathBuf,
+}
+
+/// The environment this project is running in
+#[derive(
+    Clone, Copy, Debug, Default, Display, EnumString, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum Environment {
+    #[default]
+    Local,
+    #[strum(serialize = "production")] // Keep this around for a while for backward compat
+    Deployment,
+}
+
+impl Display for DeploymentInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -47,23 +96,26 @@ impl Display for Response {
     }
 }
 
-impl State {
+impl DeploymentState {
     /// We return a &str rather than a Color here, since `comfy-table` re-exports
     /// crossterm::style::Color and we depend on both `comfy-table` and `crossterm`
     /// we may end up with two different versions of Color.
     pub fn get_color(&self) -> &str {
         match self {
-            State::Queued | State::Building | State::Built | State::Loading => "cyan",
-            State::Running => "green",
-            State::Completed | State::Stopped => "blue",
-            State::Crashed => "red",
-            State::Unknown => "yellow",
+            DeploymentState::Queued
+            | DeploymentState::Building
+            | DeploymentState::Built
+            | DeploymentState::Loading => "cyan",
+            DeploymentState::Running => "green",
+            DeploymentState::Completed | DeploymentState::Stopped => "blue",
+            DeploymentState::Crashed => "red",
+            DeploymentState::Unknown => "yellow",
         }
     }
 }
 
 pub fn get_deployments_table(
-    deployments: &Vec<Response>,
+    deployments: &Vec<DeploymentInfo>,
     service_name: &str,
     page: u32,
     raw: bool,
@@ -200,12 +252,37 @@ pub fn get_deployments_table(
     }
 }
 
-#[derive(Default, Deserialize, Serialize)]
-pub struct DeploymentRequest {
-    pub data: Vec<u8>,
-    pub no_test: bool,
-    pub git_commit_id: Option<String>,
-    pub git_commit_msg: Option<String>,
-    pub git_branch: Option<String>,
-    pub git_dirty: Option<bool>,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_state_deser() {
+        assert_eq!(
+            DeploymentState::Queued,
+            DeploymentState::from_str("Queued").unwrap()
+        );
+        assert_eq!(
+            DeploymentState::Unknown,
+            DeploymentState::from_str("unKnown").unwrap()
+        );
+        assert_eq!(
+            DeploymentState::Built,
+            DeploymentState::from_str("built").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_env_deser() {
+        assert_eq!(Environment::Local, Environment::from_str("local").unwrap());
+        assert_eq!(
+            Environment::Deployment,
+            Environment::from_str("production").unwrap()
+        );
+        assert!(DeploymentState::from_str("somewhere_else").is_err());
+        assert_eq!(format!("{:?}", Environment::Local), "Local".to_owned());
+        assert_eq!(format!("{}", Environment::Local), "local".to_owned());
+        assert_eq!(Environment::Local.to_string(), "local".to_owned());
+    }
 }
