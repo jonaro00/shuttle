@@ -256,12 +256,6 @@ pub struct UserServiceBuilder {
     public: Option<FQDN>,
 }
 
-impl Default for UserServiceBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl UserServiceBuilder {
     pub fn new() -> Self {
         Self {

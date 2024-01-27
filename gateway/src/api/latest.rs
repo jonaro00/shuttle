@@ -60,6 +60,202 @@ use super::project_caller::ProjectCaller;
 pub const SVC_DEGRADED_THRESHOLD: usize = 128;
 pub const SHUTTLE_GATEWAY_VARIANT: &str = "shuttle-gateway";
 
+#[derive(Clone)]
+pub(crate) struct RouterState {
+    pub service: Arc<GatewayService>,
+    pub sender: Sender<BoxedTask>,
+    pub running_builds: Arc<Mutex<TtlCache<Uuid, ()>>>,
+    pub posthog_client: Arc<async_posthog::Client>,
+}
+
+pub struct ApiBuilder {
+    router: Router<RouterState>,
+    service: Option<Arc<GatewayService>>,
+    sender: Option<Sender<BoxedTask>>,
+    posthog_client: Option<Arc<async_posthog::Client>>,
+    bind: Option<SocketAddr>,
+}
+
+impl ApiBuilder {
+    pub fn new() -> Self {
+        Self {
+            router: Router::new(),
+            service: None,
+            sender: None,
+            posthog_client: None,
+            bind: None,
+        }
+    }
+
+    pub fn with_acme(mut self, acme: AcmeClient, resolver: Arc<GatewayCertResolver>) -> Self {
+        self.router = self
+            .router
+            .route(
+                "/admin/acme/:email",
+                post(create_acme_account.layer(ScopedLayer::new(vec![Scope::AcmeCreate]))),
+            )
+            .route(
+                "/admin/acme/request/:project_name/:fqdn",
+                post(
+                    request_custom_domain_acme_certificate
+                        .layer(ScopedLayer::new(vec![Scope::CustomDomainCreate])),
+                ),
+            )
+            .route(
+                "/admin/acme/renew/:project_name/:fqdn",
+                post(
+                    renew_custom_domain_acme_certificate
+                        .layer(ScopedLayer::new(vec![Scope::CustomDomainCertificateRenew])),
+                ),
+            )
+            .route(
+                "/admin/acme/gateway/renew",
+                post(
+                    renew_gateway_acme_certificate
+                        .layer(ScopedLayer::new(vec![Scope::GatewayCertificateRenew])),
+                ),
+            )
+            .layer(Extension(acme))
+            .layer(Extension(resolver));
+        self
+    }
+
+    pub fn with_service(mut self, service: Arc<GatewayService>) -> Self {
+        self.service = Some(service);
+        self
+    }
+
+    pub fn with_sender(mut self, sender: Sender<BoxedTask>) -> Self {
+        self.sender = Some(sender);
+        self
+    }
+
+    pub fn with_posthog_client(mut self, posthog_client: Arc<async_posthog::Client>) -> Self {
+        self.posthog_client = Some(posthog_client);
+        self
+    }
+
+    pub fn binding_to(mut self, addr: SocketAddr) -> Self {
+        self.bind = Some(addr);
+        self
+    }
+
+    pub fn with_default_traces(mut self) -> Self {
+        self.router = self.router.route_layer(from_extractor::<Metrics>()).layer(
+            TraceLayer::new(|request| {
+                request_span!(
+                    request,
+                    account.name = field::Empty,
+                    request.params.project_name = field::Empty,
+                    request.params.account_name = field::Empty
+                )
+            })
+            .with_propagation()
+            .build(),
+        );
+        self
+    }
+
+    pub fn with_default_routes(mut self) -> Self {
+        let admin_routes = Router::new()
+            .route("/projects", get(get_projects))
+            .route("/revive", post(revive_projects))
+            .route("/destroy", post(destroy_projects))
+            .route("/idle-cch", post(idle_cch_projects))
+            .route("/stats/load", get(get_load_admin).delete(delete_load_admin))
+            .layer(ScopedLayer::new(vec![Scope::Admin]));
+
+        const CARGO_SHUTTLE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+        let project_routes = Router::new()
+            .route(
+                "/projects/:project_name",
+                get(get_project.layer(ScopedLayer::new(vec![Scope::Project])))
+                    .delete(destroy_project.layer(ScopedLayer::new(vec![Scope::ProjectWrite])))
+                    .post(create_project.layer(ScopedLayer::new(vec![Scope::ProjectWrite]))),
+            )
+            .route(
+                "/projects/:project_name/delete",
+                delete(delete_project.layer(ScopedLayer::new(vec![Scope::ProjectWrite]))),
+            )
+            .route("/projects/name/:project_name", get(check_project_name))
+            .route("/projects/:project_name/*any", any(route_project))
+            .route_layer(middleware::from_fn(project_name_tracing_layer));
+
+        self.router = self
+            .router
+            .route("/", get(get_status))
+            .merge(project_routes)
+            .route(
+                "/versions",
+                get(|| async {
+                    axum::Json(VersionInfo {
+                        gateway: env!("CARGO_PKG_VERSION").parse().unwrap(),
+                        // For now, these use the same version as gateway (we release versions in lockstep).
+                        // Only one version is officially compatible, but more are in reality.
+                        cargo_shuttle: env!("CARGO_PKG_VERSION").parse().unwrap(),
+                        deployer: env!("CARGO_PKG_VERSION").parse().unwrap(),
+                        runtime: CARGO_SHUTTLE_VERSION.parse().unwrap(),
+                    })
+                }),
+            )
+            .route(
+                "/version/cargo-shuttle",
+                get(|| async { CARGO_SHUTTLE_VERSION }),
+            )
+            .route(
+                "/projects",
+                get(get_projects_list.layer(ScopedLayer::new(vec![Scope::Project]))),
+            )
+            .route("/stats/load", post(post_load).delete(delete_load))
+            .nest("/admin", admin_routes);
+
+        self
+    }
+
+    pub fn with_auth_service(mut self, auth_uri: Uri, gateway_admin_key: String) -> Self {
+        let auth_public_key = AuthPublicKey::new(auth_uri.clone());
+
+        let jwt_cache_manager = CacheManager::new(1000);
+
+        self.router = self
+            .router
+            .layer(JwtAuthenticationLayer::new(auth_public_key))
+            .layer(ShuttleAuthLayer::new(
+                auth_uri,
+                gateway_admin_key,
+                Arc::new(Box::new(jwt_cache_manager)),
+            ));
+
+        self
+    }
+
+    pub fn into_router(self) -> Router {
+        let service = self.service.expect("a GatewayService is required");
+        let sender = self.sender.expect("a task Sender is required");
+        let posthog_client = self.posthog_client.expect("a task Sender is required");
+
+        // Allow about 4 cores per build, but use at most 75% (* 3 / 4) of all cores and at least 1 core
+        // Assumes each builder (deployer) is assigned 4 cores
+        let concurrent_builds: usize = (num_cpus::get() * 3 / 4 / 4).max(1);
+
+        let running_builds = Arc::new(Mutex::new(TtlCache::new(concurrent_builds)));
+
+        self.router.with_state(RouterState {
+            service,
+            sender,
+            posthog_client,
+            running_builds,
+        })
+    }
+
+    pub fn serve(self) -> impl Future<Output = Result<(), hyper::Error>> {
+        let bind = self.bind.expect("a socket address to bind to is required");
+        let router = self.into_router();
+        axum::Server::bind(&bind).serve(router.into_make_service())
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ComponentStatus {
@@ -777,202 +973,6 @@ async fn get_projects(
         .collect();
 
     Ok(AxumJson(projects))
-}
-
-#[derive(Clone)]
-pub(crate) struct RouterState {
-    pub service: Arc<GatewayService>,
-    pub sender: Sender<BoxedTask>,
-    pub running_builds: Arc<Mutex<TtlCache<Uuid, ()>>>,
-    pub posthog_client: Arc<async_posthog::Client>,
-}
-
-pub struct ApiBuilder {
-    router: Router<RouterState>,
-    service: Option<Arc<GatewayService>>,
-    sender: Option<Sender<BoxedTask>>,
-    posthog_client: Option<Arc<async_posthog::Client>>,
-    bind: Option<SocketAddr>,
-}
-
-impl ApiBuilder {
-    pub fn new() -> Self {
-        Self {
-            router: Router::new(),
-            service: None,
-            sender: None,
-            posthog_client: None,
-            bind: None,
-        }
-    }
-
-    pub fn with_acme(mut self, acme: AcmeClient, resolver: Arc<GatewayCertResolver>) -> Self {
-        self.router = self
-            .router
-            .route(
-                "/admin/acme/:email",
-                post(create_acme_account.layer(ScopedLayer::new(vec![Scope::AcmeCreate]))),
-            )
-            .route(
-                "/admin/acme/request/:project_name/:fqdn",
-                post(
-                    request_custom_domain_acme_certificate
-                        .layer(ScopedLayer::new(vec![Scope::CustomDomainCreate])),
-                ),
-            )
-            .route(
-                "/admin/acme/renew/:project_name/:fqdn",
-                post(
-                    renew_custom_domain_acme_certificate
-                        .layer(ScopedLayer::new(vec![Scope::CustomDomainCertificateRenew])),
-                ),
-            )
-            .route(
-                "/admin/acme/gateway/renew",
-                post(
-                    renew_gateway_acme_certificate
-                        .layer(ScopedLayer::new(vec![Scope::GatewayCertificateRenew])),
-                ),
-            )
-            .layer(Extension(acme))
-            .layer(Extension(resolver));
-        self
-    }
-
-    pub fn with_service(mut self, service: Arc<GatewayService>) -> Self {
-        self.service = Some(service);
-        self
-    }
-
-    pub fn with_sender(mut self, sender: Sender<BoxedTask>) -> Self {
-        self.sender = Some(sender);
-        self
-    }
-
-    pub fn with_posthog_client(mut self, posthog_client: Arc<async_posthog::Client>) -> Self {
-        self.posthog_client = Some(posthog_client);
-        self
-    }
-
-    pub fn binding_to(mut self, addr: SocketAddr) -> Self {
-        self.bind = Some(addr);
-        self
-    }
-
-    pub fn with_default_traces(mut self) -> Self {
-        self.router = self.router.route_layer(from_extractor::<Metrics>()).layer(
-            TraceLayer::new(|request| {
-                request_span!(
-                    request,
-                    account.name = field::Empty,
-                    request.params.project_name = field::Empty,
-                    request.params.account_name = field::Empty
-                )
-            })
-            .with_propagation()
-            .build(),
-        );
-        self
-    }
-
-    pub fn with_default_routes(mut self) -> Self {
-        let admin_routes = Router::new()
-            .route("/projects", get(get_projects))
-            .route("/revive", post(revive_projects))
-            .route("/destroy", post(destroy_projects))
-            .route("/idle-cch", post(idle_cch_projects))
-            .route("/stats/load", get(get_load_admin).delete(delete_load_admin))
-            .layer(ScopedLayer::new(vec![Scope::Admin]));
-
-        const CARGO_SHUTTLE_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-        let project_routes = Router::new()
-            .route(
-                "/projects/:project_name",
-                get(get_project.layer(ScopedLayer::new(vec![Scope::Project])))
-                    .delete(destroy_project.layer(ScopedLayer::new(vec![Scope::ProjectWrite])))
-                    .post(create_project.layer(ScopedLayer::new(vec![Scope::ProjectWrite]))),
-            )
-            .route(
-                "/projects/:project_name/delete",
-                delete(delete_project.layer(ScopedLayer::new(vec![Scope::ProjectWrite]))),
-            )
-            .route("/projects/name/:project_name", get(check_project_name))
-            .route("/projects/:project_name/*any", any(route_project))
-            .route_layer(middleware::from_fn(project_name_tracing_layer));
-
-        self.router = self
-            .router
-            .route("/", get(get_status))
-            .merge(project_routes)
-            .route(
-                "/versions",
-                get(|| async {
-                    axum::Json(VersionInfo {
-                        gateway: env!("CARGO_PKG_VERSION").parse().unwrap(),
-                        // For now, these use the same version as gateway (we release versions in lockstep).
-                        // Only one version is officially compatible, but more are in reality.
-                        cargo_shuttle: env!("CARGO_PKG_VERSION").parse().unwrap(),
-                        deployer: env!("CARGO_PKG_VERSION").parse().unwrap(),
-                        runtime: CARGO_SHUTTLE_VERSION.parse().unwrap(),
-                    })
-                }),
-            )
-            .route(
-                "/version/cargo-shuttle",
-                get(|| async { CARGO_SHUTTLE_VERSION }),
-            )
-            .route(
-                "/projects",
-                get(get_projects_list.layer(ScopedLayer::new(vec![Scope::Project]))),
-            )
-            .route("/stats/load", post(post_load).delete(delete_load))
-            .nest("/admin", admin_routes);
-
-        self
-    }
-
-    pub fn with_auth_service(mut self, auth_uri: Uri, gateway_admin_key: String) -> Self {
-        let auth_public_key = AuthPublicKey::new(auth_uri.clone());
-
-        let jwt_cache_manager = CacheManager::new(1000);
-
-        self.router = self
-            .router
-            .layer(JwtAuthenticationLayer::new(auth_public_key))
-            .layer(ShuttleAuthLayer::new(
-                auth_uri,
-                gateway_admin_key,
-                Arc::new(Box::new(jwt_cache_manager)),
-            ));
-
-        self
-    }
-
-    pub fn into_router(self) -> Router {
-        let service = self.service.expect("a GatewayService is required");
-        let sender = self.sender.expect("a task Sender is required");
-        let posthog_client = self.posthog_client.expect("a task Sender is required");
-
-        // Allow about 4 cores per build, but use at most 75% (* 3 / 4) of all cores and at least 1 core
-        // Assumes each builder (deployer) is assigned 4 cores
-        let concurrent_builds: usize = (num_cpus::get() * 3 / 4 / 4).max(1);
-
-        let running_builds = Arc::new(Mutex::new(TtlCache::new(concurrent_builds)));
-
-        self.router.with_state(RouterState {
-            service,
-            sender,
-            posthog_client,
-            running_builds,
-        })
-    }
-
-    pub fn serve(self) -> impl Future<Output = Result<(), hyper::Error>> {
-        let bind = self.bind.expect("a socket address to bind to is required");
-        let router = self.into_router();
-        axum::Server::bind(&bind).serve(router.into_make_service())
-    }
 }
 
 #[cfg(test)]
