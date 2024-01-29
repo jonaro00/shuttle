@@ -19,7 +19,7 @@ pub struct ResourceInfo {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(into = "String", try_from = "String")]
 pub enum ResourceType {
     Database(DatabaseType),
     Secrets,
@@ -78,5 +78,45 @@ impl Display for ResourceType {
             ResourceType::Metadata => write!(f, "metadata"),
             ResourceType::Custom => write!(f, "custom"),
         }
+    }
+}
+
+impl Into<String> for ResourceType {
+    fn into(self) -> String {
+        format!("{}", self)
+    }
+}
+
+impl TryFrom<String> for ResourceType {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn serde_as_string() {
+        assert_eq!(
+            serde_json::to_string(&ResourceType::Custom).unwrap(),
+            "\"custom\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ResourceType::Database(DatabaseType::Shared(
+                crate::database::SharedEngine::Postgres
+            )))
+            .unwrap(),
+            "\"database::shared::postgres\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ResourceType>("\"database::shared::postgres\"").unwrap(),
+            ResourceType::Database(DatabaseType::Shared(
+                crate::database::SharedEngine::Postgres
+            ))
+        );
     }
 }
